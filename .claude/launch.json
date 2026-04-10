@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "cx-dashboard",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["server.js"],
+      "port": 3456
+    },
+    {
+      "name": "wiom-dashboard",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["scripts/serve_dashboard.py"],
+      "port": 8765
+    }
+  ]
+}

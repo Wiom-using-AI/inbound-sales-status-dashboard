@@ -1,0 +1,56 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+
+# Credentials - NEVER commit
+.env
+credentials/
+
+# Generated output (rebuilt from data)
+output/
+
+# Data files (pulled from Metabase at runtime)
+data/
+
+# Temp files
+*.tmp
+logs/
+uploads/
+UsersRashi*
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# IDE
+.vscode/
+.idea/
+
+# Other project files not part of inbound dashboard
+*.xlsx
+*.docx
+voc_*.txt
+team-tracker/
+wiom-hub-tracker/
+public/
+*.gs
+analyze_fraud.js
+create_fraud_docx.js
+create_fraud_report.js
+create_manpower_tool.js
+create_manpower_tool.py
+create_voc_doc.js
+create_voc_full.js
+deep_verify.js
+erlang_c_manpower.py
+explore_schema.py
+generate_report.js
+index.html
+parse_voc.js
+serve.js
+server.js
+verify_formulas.js
+package.json
+package-lock.json
