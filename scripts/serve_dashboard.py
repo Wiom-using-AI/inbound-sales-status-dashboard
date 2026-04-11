@@ -71,7 +71,7 @@ def build_where(cls: str, code: str, scope: str, day: str, ym: str) -> str:
     # --- date filter ---
     if scope == "day" and day:
         wh.append(
-            "TRY_TO_DATE(CALL_TIME,'DD/MM/YYYY HH12:MI:SS AM') "
+            "CALL_TIME::DATE "
             f"= DATE '{day}'"
         )
     elif scope in ("mtd", "prev") and ym:
@@ -84,9 +84,9 @@ def build_where(cls: str, code: str, scope: str, day: str, ym: str) -> str:
         else:
             end = date(int(y), int(m) + 1, 1)
         wh.append(
-            "TRY_TO_DATE(CALL_TIME,'DD/MM/YYYY HH12:MI:SS AM') "
+            "CALL_TIME::DATE "
             f">= DATE '{start.isoformat()}' AND "
-            "TRY_TO_DATE(CALL_TIME,'DD/MM/YYYY HH12:MI:SS AM') "
+            "CALL_TIME::DATE "
             f"<  DATE '{end.isoformat()}'"
         )
 

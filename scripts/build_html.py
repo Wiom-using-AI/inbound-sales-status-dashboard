@@ -423,7 +423,7 @@ for (cls, code), dd in counts.items():
         code_grand_total[code] += n
 
 # Pick top 10 codes by grand total volume
-top10_codes = sorted(code_grand_total.keys(), key=lambda c: code_grand_total[c], reverse=True)[:10]
+top10_codes = sorted(code_grand_total.keys(), key=lambda c: code_grand_total[c], reverse=True)[:15]
 
 top10_datasets = []
 for ym in months_sorted:
@@ -460,10 +460,10 @@ for ym in reversed(display_months):
 tabs_buttons.append('<button class="tab-btn" data-target="tab-mom">MoM Comparison</button>')
 mom_panel = f'''
 <section id="tab-mom" class="tab-panel">
-  <div class="chart-wrap"><canvas id="momChart"></canvas></div>
+  <div class="chart-wrap" style="position:relative; height:420px;"><canvas id="momChart"></canvas></div>
   {mom_table}
   <div style="margin-top:28px"></div>
-  <div class="chart-wrap"><canvas id="top10Chart"></canvas></div>
+  <div class="chart-wrap" style="position:relative; height:420px;"><canvas id="top10Chart"></canvas></div>
   {top10_table}
 </section>
 '''
@@ -532,31 +532,37 @@ per_tab_aht["tab-mom"] = fmt_aht(avg(all_ahts_sec)) if all_ahts_sec else "0:00"
 # Per-tab highlights: for each display month, find top spikes on the latest day.
 
 def compute_highlights(ym):
-    """Return list of spike dicts for the latest day of month ym."""
+    """Return list of spike dicts: MTD avg vs previous month avg."""
     hl = []
     if ym not in by_month:
         return hl
-    latest_day = max(by_month[ym])
+    prev_ym = (ym[0], ym[1] - 1) if ym[1] > 1 else (ym[0] - 1, 12)
+    prev_days_set = by_month.get(prev_ym, set())
     for cls, codes in taxonomy:
-        class_day_vals = {}
+        # Current month daily values for this class
+        class_cur_vals = {}
+        class_prev_vals = {}
         for (k_cls, _k_code), dd in counts.items():
             if k_cls != cls:
                 continue
             for d, n in dd.items():
                 if (d.year, d.month) == ym:
-                    class_day_vals[d] = class_day_vals.get(d, 0) + n
-        cls_mtd_hl = avg(class_day_vals.values()) if class_day_vals else 0
-        latest_val = class_day_vals.get(latest_day, 0)
-        spiked, pct = spike(latest_val, cls_mtd_hl)
+                    class_cur_vals[d] = class_cur_vals.get(d, 0) + n
+                if (d.year, d.month) == prev_ym:
+                    class_prev_vals[d] = class_prev_vals.get(d, 0) + n
+        cls_mtd = avg(class_cur_vals.values()) if class_cur_vals else 0
+        cls_prev = avg(class_prev_vals.values()) if class_prev_vals else 0
+        spiked, pct = spike(cls_mtd, cls_prev)
         if spiked:
-            hl.append({"name": cls, "val": latest_val, "pct": pct, "is_class": True})
+            hl.append({"name": cls, "val": int(round(cls_mtd)), "pct": pct, "is_class": True})
         for code in codes:
-            code_day_vals = {d: counts[(cls, code)].get(d, 0) for d in by_month[ym]}
-            code_mtd = avg(code_day_vals.values()) if code_day_vals else 0
-            code_latest = code_day_vals.get(latest_day, 0)
-            s2, p2 = spike(code_latest, code_mtd)
+            code_cur = {d: counts[(cls, code)].get(d, 0) for d in by_month[ym]}
+            code_prev = {d: counts[(cls, code)].get(d, 0) for d in prev_days_set}
+            mtd_avg = avg(code_cur.values()) if code_cur else 0
+            prev_avg = avg(code_prev.values()) if code_prev else 0
+            s2, p2 = spike(mtd_avg, prev_avg)
             if s2:
-                hl.append({"name": code, "val": code_latest, "pct": p2, "is_class": False})
+                hl.append({"name": code, "val": int(round(mtd_avg)), "pct": p2, "is_class": False})
     hl.sort(key=lambda x: x["pct"], reverse=True)
     return hl[:8]
 
@@ -565,7 +571,7 @@ def build_hl_html(ym, tab_id):
     hl = compute_highlights(ym)
     if not hl:
         return ""
-    latest_day = max(by_month[ym])
+    prev_ym = (ym[0], ym[1] - 1) if ym[1] > 1 else (ym[0] - 1, 12)
     chips = []
     for h in hl:
         weight = "700" if h["is_class"] else "400"
@@ -578,7 +584,7 @@ def build_hl_html(ym, tab_id):
         )
     return (
         f'<div class="highlights hl-tab" data-tab="{tab_id}">'
-        f'<div class="hl-title">Top spikes on {latest_day.strftime("%d-%b")}</div>'
+        f'<div class="hl-title">Top spikes — {fmt_month(ym)} avg vs {fmt_month(prev_ym)} avg</div>'
         f'<div class="hl-chips">{"".join(chips)}</div>'
         f'</div>'
     )
@@ -751,7 +757,7 @@ table.metrics-dash td.num.avgcol {{ background: #C8E6C9 !important; }}
 .legend .pill {{ background: var(--grey-soft); padding: 3px 10px; border-radius: 10px;
   font-size: 11px; }}
 
-.chart-wrap {{ max-width: 1100px; background: #fff; padding: 16px; border: 1px solid var(--grey);
+.chart-wrap {{ background: #fff; padding: 16px; border: 1px solid var(--grey);
   border-radius: 8px; margin-bottom: 20px; box-shadow: 0 1px 4px rgba(0,0,0,.06); }}
 footer {{ color: var(--muted); font-size: 11px; text-align: center; padding: 24px;
   background: #fff; border-top: 1px solid var(--grey); }}
@@ -844,7 +850,7 @@ footer {{ color: var(--muted); font-size: 11px; text-align: center; padding: 24p
   </div>
 </div>
 
-<footer>Wiom · Inbound Call Dashboard · auto-refreshed daily at 08:30 via Windows Scheduled Task
+<footer>Wiom · Inbound Call Dashboard · auto-refreshed daily at 06:00 via Windows Scheduled Task
 <code>WiomInboundCallDashboard</code></footer>
 
 <script>
@@ -1013,62 +1019,71 @@ const palette = ['#E91E8C','#1E88E5','#43A047','#FB8C00','#8E24AA','#00897B','#D
 let chartInstance = null;
 let top10ChartInstance = null;
 function renderChart() {{
-  if (!chartInstance) {{
-    const ctx = document.getElementById('momChart').getContext('2d');
-    chartInstance = new Chart(ctx, {{
-      type: 'line',
-      data: {{
-        labels: MOM_LABELS,
-        datasets: MOM_DATASETS.map((ds, i) => ({{
-          label: ds.label,
-          data: ds.data,
-          borderColor: palette[i % palette.length],
-          backgroundColor: palette[i % palette.length] + '33',
-          tension: 0.25, borderWidth: 2, pointRadius: 3,
-        }}))
-      }},
-      options: {{
-        responsive: true,
-        plugins: {{
-          title: {{ display: true,
-            text: 'Month-on-Month Avg Daily Inbound Calls by Disposition Class' }},
-          legend: {{ position: 'top' }}
+  // Delay to ensure the tab panel is visible and has layout dimensions
+  setTimeout(function() {{
+    if (!chartInstance) {{
+      const ctx = document.getElementById('momChart').getContext('2d');
+      chartInstance = new Chart(ctx, {{
+        type: 'line',
+        data: {{
+          labels: MOM_LABELS,
+          datasets: MOM_DATASETS.map((ds, i) => ({{
+            label: ds.label,
+            data: ds.data,
+            borderColor: palette[i % palette.length],
+            backgroundColor: palette[i % palette.length] + '33',
+            tension: 0.25, borderWidth: 2, pointRadius: 3,
+          }}))
         }},
-        scales: {{
-          x: {{ ticks: {{ autoSkip: false, maxRotation: 60, minRotation: 30 }} }},
-          y: {{ title: {{ display: true, text: 'Avg calls / day' }} }}
+        options: {{
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {{
+            title: {{ display: true,
+              text: 'M.o.M Avg Daily Inbound Calls - Category Wise' }},
+            legend: {{ position: 'top' }}
+          }},
+          scales: {{
+            x: {{ ticks: {{ autoSkip: false, maxRotation: 45, minRotation: 20, font: {{ size: 10 }} }} }},
+            y: {{ title: {{ display: true, text: 'Avg calls / day' }} }}
+          }}
         }}
-      }}
-    }});
-  }}
-  if (!top10ChartInstance) {{
-    const ctx2 = document.getElementById('top10Chart').getContext('2d');
-    top10ChartInstance = new Chart(ctx2, {{
-      type: 'line',
-      data: {{
-        labels: TOP10_LABELS,
-        datasets: TOP10_DATASETS.map((ds, i) => ({{
-          label: ds.label,
-          data: ds.data,
-          borderColor: palette[i % palette.length],
-          backgroundColor: palette[i % palette.length] + '33',
-          tension: 0.25, borderWidth: 2, pointRadius: 4,
-        }}))
-      }},
-      options: {{
-        responsive: true,
-        plugins: {{
-          title: {{ display: true,
-            text: 'Month-on-Month Avg Daily Inbound Calls — Top 10 Sub-category Issues' }},
-          legend: {{ position: 'top' }}
+      }});
+    }} else {{
+      chartInstance.resize();
+    }}
+    if (!top10ChartInstance) {{
+      const ctx2 = document.getElementById('top10Chart').getContext('2d');
+      top10ChartInstance = new Chart(ctx2, {{
+        type: 'line',
+        data: {{
+          labels: TOP10_LABELS,
+          datasets: TOP10_DATASETS.map((ds, i) => ({{
+            label: ds.label,
+            data: ds.data,
+            borderColor: palette[i % palette.length],
+            backgroundColor: palette[i % palette.length] + '33',
+            tension: 0.25, borderWidth: 2, pointRadius: 4,
+          }}))
         }},
-        scales: {{
-          x: {{ ticks: {{ autoSkip: false, maxRotation: 45, minRotation: 20 }} }},
-          y: {{ title: {{ display: true, text: 'Avg calls / day' }} }}
+        options: {{
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {{
+            title: {{ display: true,
+              text: 'M.o.M Avg Daily Inbound Calls - Top 15 Sub-categories' }},
+            legend: {{ position: 'top' }}
+          }},
+          scales: {{
+            x: {{ ticks: {{ autoSkip: false, maxRotation: 45, minRotation: 20, font: {{ size: 10 }} }} }},
+            y: {{ title: {{ display: true, text: 'Avg calls / day' }} }}
+          }}
         }}
-      }}
-    }});
-  }}
+      }});
+    }} else {{
+      top10ChartInstance.resize();
+    }}
+  }}, 50);
 }}
 </script>
 </body>

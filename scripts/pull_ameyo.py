@@ -36,6 +36,17 @@ def run_query(sql, out_path):
     )
     with urllib.request.urlopen(req, timeout=300) as r:
         csv_bytes = r.read()
+    # Guard: if Metabase returns a JSON error, don't overwrite good data
+    text = csv_bytes.decode("utf-8", errors="replace").strip()
+    if text.startswith("{"):
+        try:
+            err = json.loads(text)
+            msg = err.get("error", text[:200])
+        except Exception:
+            msg = text[:200]
+        print(f"  ERROR from Metabase: {msg}")
+        print("  Keeping existing data file unchanged.")
+        sys.exit(1)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_bytes(csv_bytes)
     with out_path.open("r", encoding="utf-8") as f:
@@ -47,7 +58,7 @@ def run_query(sql, out_path):
 SQL_COUNTS = """
 WITH base AS (
   SELECT
-    TRY_TO_DATE(CALL_TIME, 'DD/MM/YYYY HH12:MI:SS AM') AS call_date,
+    CALL_TIME::DATE AS call_date,
     COALESCE(NULLIF(TRIM(DISPOSITION_CLASS), ''), '(Unclassified)') AS disposition_class,
     COALESCE(NULLIF(TRIM(DISPOSITION_CODE),  ''), '(Unclassified)') AS disposition_code
   FROM PROD_DB.PUBLIC.AMEYO_CALL_DETAILS_REPORT
@@ -67,7 +78,7 @@ ORDER BY 1, 2, 3
 SQL_METRICS = """
 WITH base AS (
   SELECT
-    TRY_TO_DATE(CALL_TIME, 'DD/MM/YYYY HH12:MI:SS AM') AS call_date,
+    CALL_TIME::DATE AS call_date,
     COALESCE(NULLIF(TRIM(DISPOSITION_CLASS), ''), '(Unclassified)') AS disposition_class,
     DATEDIFF('second', '00:00:00'::TIME, TRY_TO_TIME(USER_TALK_TIME))  AS talk_sec,
     DATEDIFF('second', '00:00:00'::TIME, TRY_TO_TIME(ACW_DURATION))    AS acw_sec,
