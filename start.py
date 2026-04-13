@@ -34,4 +34,5 @@ except Exception as e:
 # Step 4: Serve the dashboard
 print("=== Starting server ===", flush=True)
 os.environ["HOST"] = "0.0.0.0"
+os.environ["DASHBOARD_ROOT"] = os.path.join(BASE, "output", "web")
 exec(open(os.path.join(SCRIPTS, "serve_dashboard.py")).read())
