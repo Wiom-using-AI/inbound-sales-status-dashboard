@@ -235,8 +235,13 @@ def metrics_table(ym):
         t = vol_prev.get(d, 0)
         m = miss_prev.get(d, 0)
         misspct_prev[d] = (m / t * 100) if t else 0
-    misspct_mtd  = avg(misspct_day.values())  if misspct_day  else 0
-    misspct_pavg = avg(misspct_prev.values()) if misspct_prev else 0
+    # Weighted missed %: total missed / total calls (not avg of daily %)
+    _tot_calls_mtd = sum(vol_day.values())
+    _tot_miss_mtd  = sum(miss_day.values())
+    misspct_mtd  = (_tot_miss_mtd / _tot_calls_mtd * 100) if _tot_calls_mtd else 0
+    _tot_calls_prev = sum(vol_prev.values())
+    _tot_miss_prev  = sum(miss_prev.values())
+    misspct_pavg = (_tot_miss_prev / _tot_calls_prev * 100) if _tot_calls_prev else 0
 
     rows_html = []
 
@@ -506,14 +511,11 @@ for ym in display_months:
     tab_id = f"tab-{ym[0]}-{ym[1]:02d}"
     ym_dates = [d for d in metrics_by_date if (d.year, d.month) == ym]
     if ym_dates:
-        daily_pcts = []
-        daily_ahts = []
-        for d in ym_dates:
-            m = metrics_by_date[d]
-            pct = (m["missed"] / m["total"] * 100) if m["total"] else 0
-            daily_pcts.append(pct)
-            daily_ahts.append(m["aht"])
-        per_tab_misspct[tab_id] = round(avg(daily_pcts), 1)
+        total_calls = sum(metrics_by_date[d]["total"] for d in ym_dates)
+        total_missed = sum(metrics_by_date[d]["missed"] for d in ym_dates)
+        daily_ahts = [metrics_by_date[d]["aht"] for d in ym_dates]
+        weighted_pct = (total_missed / total_calls * 100) if total_calls else 0
+        per_tab_misspct[tab_id] = round(weighted_pct, 1)
         per_tab_aht[tab_id] = fmt_aht(avg(daily_ahts))
     else:
         per_tab_misspct[tab_id] = 0
