@@ -107,14 +107,17 @@ def build_where(cls: str, code: str, scope: str, day: str, ym: str) -> str:
     return " AND ".join(wh)
 
 
-def metabase_query(sql: str):
+def metabase_query_csv(sql: str):
+    """Use /api/dataset/csv to get ALL rows (no 2000-row cap)."""
+    import csv as csv_mod, io
+    csv_url = METABASE_URL.replace("/api/dataset", "/api/dataset/csv")
     payload = json.dumps({
         "database": DATABASE_ID,
         "type": "native",
         "native": {"query": sql},
     }).encode()
     req = urllib.request.Request(
-        METABASE_URL,
+        csv_url,
         data=payload,
         method="POST",
         headers={
@@ -122,8 +125,16 @@ def metabase_query(sql: str):
             "Content-Type": "application/json",
         },
     )
-    with urllib.request.urlopen(req, timeout=120) as r:
-        return json.loads(r.read())
+    with urllib.request.urlopen(req, timeout=300) as r:
+        raw = r.read().decode("utf-8", errors="replace")
+    # Check for JSON error response
+    if raw.strip().startswith("{"):
+        err = json.loads(raw)
+        raise RuntimeError(err.get("error", raw[:200]))
+    reader = csv_mod.reader(io.StringIO(raw))
+    headers = next(reader)
+    rows = [row for row in reader]
+    return headers, rows
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -187,17 +198,12 @@ class Handler(SimpleHTTPRequestHandler):
         )
 
         try:
-            data = metabase_query(sql)
+            headers, rows = metabase_query_csv(sql)
         except Exception as e:
             return self.send_json(500, {"error": f"Metabase request failed: {e}"})
 
-        if data.get("status") != "completed":
-            err = data.get("error") or "Metabase query failed"
-            return self.send_json(500, {"error": str(err)[:500], "sql": sql})
-
-        rows = data.get("data", {}).get("rows", [])
         return self.send_json(200, {
-            "cols": RAW_COLS,
+            "cols": headers,
             "rows": rows,
             "count": len(rows),
             "sql": sql,
