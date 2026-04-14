@@ -1,13 +1,21 @@
 """
 Railway startup script.
 Pulls data from Metabase, builds the HTML dashboard, then serves it.
+A background thread re-pulls + rebuilds every day at 06:00 IST.
 """
 import subprocess
 import sys
 import os
+import threading
+import time
+from datetime import datetime, timedelta, timezone
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 SCRIPTS = os.path.join(BASE, "scripts")
+IST = timezone(timedelta(hours=5, minutes=30))
+REFRESH_HOUR = 6   # 06:00 IST
+REFRESH_MINUTE = 0
+
 
 def run(script):
     print(f"=== Running {script} ===", flush=True)
@@ -19,19 +27,47 @@ def run(script):
     if result.returncode != 0:
         print(f"WARNING: {script} exited with code {result.returncode}", flush=True)
 
-# Step 1: Pull data from Metabase
-run("pull_ameyo.py")
 
-# Step 2: Build HTML dashboard
-run("build_html.py")
+def refresh():
+    """Pull fresh data and rebuild the dashboard HTML."""
+    print(f"[{datetime.now(IST).strftime('%Y-%m-%d %H:%M:%S')} IST] "
+          "Starting daily refresh...", flush=True)
+    run("pull_ameyo.py")
+    run("build_html.py")
+    try:
+        run("build_dashboard.py")
+    except Exception as e:
+        print(f"Excel build skipped: {e}", flush=True)
+    print(f"[{datetime.now(IST).strftime('%Y-%m-%d %H:%M:%S')} IST] "
+          "Daily refresh complete.", flush=True)
 
-# Step 3: Build Excel dashboard (optional, non-blocking)
-try:
-    run("build_dashboard.py")
-except Exception as e:
-    print(f"Excel build skipped: {e}", flush=True)
 
-# Step 4: Serve the dashboard
+def scheduler_loop():
+    """Sleep until the next 06:00 IST, then refresh and repeat."""
+    while True:
+        now = datetime.now(IST)
+        target = now.replace(hour=REFRESH_HOUR, minute=REFRESH_MINUTE,
+                             second=0, microsecond=0)
+        if target <= now:
+            target += timedelta(days=1)
+        wait_sec = (target - now).total_seconds()
+        print(f"[scheduler] Next refresh at {target.strftime('%Y-%m-%d %H:%M')} IST "
+              f"(in {wait_sec/3600:.1f}h)", flush=True)
+        time.sleep(wait_sec)
+        try:
+            refresh()
+        except Exception as e:
+            print(f"[scheduler] Refresh failed: {e}", flush=True)
+
+
+# --- Initial data pull ---
+refresh()
+
+# --- Start background scheduler ---
+t = threading.Thread(target=scheduler_loop, daemon=True)
+t.start()
+
+# --- Start server ---
 print("=== Starting server ===", flush=True)
 os.environ["HOST"] = "0.0.0.0"
 os.environ["DASHBOARD_ROOT"] = os.path.join(BASE, "output", "web")
