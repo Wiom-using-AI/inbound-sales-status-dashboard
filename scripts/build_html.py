@@ -811,7 +811,8 @@ footer {{ color: var(--muted); font-size: 11px; text-align: center; padding: 24p
     <div class="stat-card"><div class="k" id="stat-total-label">Total Inbound Calls</div><div class="v" id="stat-total">-</div></div>
     <div class="stat-card"><div class="k" id="stat-miss-label">Missed Call % (MTD)</div><div class="v" id="stat-miss">-</div></div>
     <div class="stat-card"><div class="k" id="stat-aht-label">Avg AHT</div><div class="v" id="stat-aht">-</div></div>
-    <div class="stat-card"><div class="k">Last Refreshed</div><div class="v">{refreshed_at}</div></div>
+    <div class="stat-card"><div class="k">Last Refreshed</div><div class="v">{refreshed_at}</div>
+      <button onclick="manualRefresh(this)" style="margin-top:4px;padding:3px 10px;font-size:11px;cursor:pointer;border:1px solid #d32f2f;background:#fff;color:#d32f2f;border-radius:4px;font-weight:600;">Refresh Now</button></div>
   </div>
 </header>
 
@@ -852,10 +853,24 @@ footer {{ color: var(--muted); font-size: 11px; text-align: center; padding: 24p
   </div>
 </div>
 
-<footer>Wiom · Inbound Call Dashboard · auto-refreshed daily at 06:00 via Windows Scheduled Task
-<code>WiomInboundCallDashboard</code></footer>
+<footer>Wiom · Inbound Call Dashboard · auto-refreshed daily at 08:00 IST · Use "Refresh Now" button for manual update</footer>
 
 <script>
+function manualRefresh(btn) {{
+  btn.disabled = true;
+  btn.textContent = 'Refreshing...';
+  btn.style.background = '#fff3e0';
+  btn.style.color = '#e65100';
+  fetch('/refresh').then(r => r.json()).then(d => {{
+    btn.textContent = 'Reloading...';
+    setTimeout(() => location.reload(), 35000);
+  }}).catch(e => {{
+    btn.textContent = 'Error — retry';
+    btn.disabled = false;
+    btn.style.background = '#fff';
+    btn.style.color = '#d32f2f';
+  }});
+}}
 const PER_TAB_TOTALS = {json.dumps(per_tab_totals)};
 const CODES_PER_TAB  = {json.dumps(codes_per_tab)};
 const PER_TAB_MISSPCT = {json.dumps(per_tab_misspct)};

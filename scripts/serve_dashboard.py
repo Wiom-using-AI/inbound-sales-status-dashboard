@@ -137,7 +137,28 @@ class Handler(SimpleHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         if parsed.path == "/raw":
             return self.handle_raw(parsed)
+        if parsed.path == "/refresh":
+            return self.handle_refresh()
         return super().do_GET()
+
+    def handle_refresh(self):
+        """Trigger a manual data refresh (pull + rebuild)."""
+        import subprocess, threading
+        base = Path(os.environ.get("DASHBOARD_ROOT",
+                    str(Path(__file__).resolve().parent.parent / "output" / "web")))
+        project_root = base.parent.parent  # output/web -> output -> project
+        scripts_dir = project_root / "scripts"
+
+        def do_refresh():
+            for script in ["pull_ameyo.py", "build_html.py"]:
+                subprocess.run(
+                    [sys.executable, str(scripts_dir / script)],
+                    cwd=str(project_root),
+                )
+            print("[manual refresh] Complete.", flush=True)
+
+        threading.Thread(target=do_refresh, daemon=True).start()
+        return self.send_json(200, {"status": "Refresh started. Page will update in ~30 seconds."})
 
     def send_json(self, code, obj):
         body = json.dumps(obj).encode()
@@ -162,7 +183,7 @@ class Handler(SimpleHTTPRequestHandler):
         cols_sql = ", ".join(RAW_COLS)
         sql = (
             f"SELECT {cols_sql} FROM PROD_DB.PUBLIC.AMEYO_CALL_DETAILS_REPORT "
-            f"WHERE {where} ORDER BY CALL_TIME DESC LIMIT 2000"
+            f"WHERE {where} ORDER BY CALL_TIME DESC"
         )
 
         try:

@@ -1,7 +1,7 @@
 """
 Railway startup script.
 Pulls data from Metabase, builds the HTML dashboard, then serves it.
-A background thread re-pulls + rebuilds every day at 06:00 IST.
+A background thread re-pulls + rebuilds every day at 08:00 IST.
 """
 import subprocess
 import sys
@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 BASE = os.path.dirname(os.path.abspath(__file__))
 SCRIPTS = os.path.join(BASE, "scripts")
 IST = timezone(timedelta(hours=5, minutes=30))
-REFRESH_HOUR = 6   # 06:00 IST
+REFRESH_HOUR = 8   # 08:00 IST
 REFRESH_MINUTE = 0
 
 
