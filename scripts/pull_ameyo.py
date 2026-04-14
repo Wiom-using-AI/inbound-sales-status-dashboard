@@ -91,7 +91,9 @@ SELECT
   call_date,
   COUNT(*)                                             AS total_calls,
   SUM(CASE WHEN disposition_class = '(Unclassified)' THEN 1 ELSE 0 END)  AS missed_calls,
-  AVG(COALESCE(talk_sec, 0) + COALESCE(acw_sec, 0))   AS avg_aht_sec,
+  AVG(CASE WHEN disposition_class != '(Unclassified)'
+      THEN COALESCE(talk_sec, 0) + COALESCE(acw_sec, 0)
+      END)                                             AS avg_aht_sec,
   COUNT(DISTINCT USER_ID)                              AS agents_logged
 FROM base
 WHERE call_date >= '2026-02-01'
