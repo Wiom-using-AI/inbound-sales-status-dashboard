@@ -62,9 +62,11 @@ def display_class(src_cls: str) -> str:
         return CLASS_MERGE_EXACT[src_cls]
     if src_cls.startswith("Sales-") or src_cls.startswith("Sales "):
         return "Sales Queue"
+    if src_cls == "(Unclassified)" or src_cls == "" or src_cls is None:
+        return "Missed Calls"
     return src_cls
 
-COLLAPSED_CLASSES  = {"(Unclassified)",
+COLLAPSED_CLASSES  = {"Missed Calls",
                       "PayG - Clarification Provided",
                       "user.forced.logged.off",
                       "user.transferred.to.campaign"}
@@ -107,7 +109,7 @@ MIDDLE_ORDER  = [
     "user.forced.logged.off",
     "user.transferred.to.campaign",
 ]
-PINNED_BOTTOM = ["(Unclassified)"]
+PINNED_BOTTOM = ["Missed Calls"]
 
 cls_codes = defaultdict(set)
 for cls, code in counts.keys():
@@ -283,6 +285,42 @@ def metrics_table(ym):
     cells.append(f'<td class="num prev avgcol">{int(round(agents_pavg))}</td>')
     for d in days_desc:
         cells.append(f'<td class="num">{agents_day.get(d, 0)}</td>')
+    rows_html.append(f'<tr class="row-class">{"".join(cells)}</tr>')
+
+    # Row 5: Transferred % = user.transferred.to.aq / Total calls
+    # Pull transferred counts from the disposition counts dict (code-level lookup)
+    trans_day  = {}
+    trans_prev = {}
+    for d in days_desc:
+        tot = 0
+        for (cls, code), dd in counts.items():
+            if code == "user.transferred.to.aq":
+                tot += dd.get(d, 0)
+        trans_day[d] = tot
+    for d in prev_days:
+        tot = 0
+        for (cls, code), dd in counts.items():
+            if code == "user.transferred.to.aq":
+                tot += dd.get(d, 0)
+        trans_prev[d] = tot
+
+    def transferred_pct(trans_d, vol_d):
+        t = vol_d if vol_d else 0
+        return (trans_d / t * 100) if t else 0
+
+    trans_pct_day  = {d: transferred_pct(trans_day.get(d, 0),  vol_day.get(d, 0))  for d in days_desc}
+    trans_pct_prev = {d: transferred_pct(trans_prev.get(d, 0), vol_prev.get(d, 0)) for d in prev_days}
+
+    _tot_trans_mtd  = sum(trans_day.values())
+    trans_pct_mtd   = (_tot_trans_mtd  / _tot_calls_mtd  * 100) if _tot_calls_mtd  else 0
+    _tot_trans_prev = sum(trans_prev.values())
+    trans_pct_pavg  = (_tot_trans_prev / _tot_calls_prev * 100) if _tot_calls_prev else 0
+
+    cells = ['<td class="disp disp-class">Transferred % (to AQ)</td>']
+    cells.append(f'<td class="num mtd avgcol">{fmt_pct(trans_pct_mtd)}</td>')
+    cells.append(f'<td class="num prev avgcol">{fmt_pct(trans_pct_pavg)}</td>')
+    for d in days_desc:
+        cells.append(f'<td class="num">{fmt_pct(trans_pct_day.get(d, 0))}</td>')
     rows_html.append(f'<tr class="row-class">{"".join(cells)}</tr>')
 
     return f'<table class="dash metrics-dash"><thead>{thead}</thead><tbody>{"".join(rows_html)}</tbody></table>'

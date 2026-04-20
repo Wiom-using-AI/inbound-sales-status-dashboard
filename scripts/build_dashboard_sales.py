@@ -62,10 +62,12 @@ def display_class(src_cls: str) -> str:
         return CLASS_MERGE_EXACT[src_cls]
     if src_cls.startswith("Sales-") or src_cls.startswith("Sales "):
         return "Sales Queue"
+    if src_cls == "(Unclassified)" or src_cls == "" or src_cls is None:
+        return "Missed Calls"
     return src_cls
 
 # Classes that are rendered as a single aggregated row (no child codes).
-COLLAPSED_CLASSES = {"(Unclassified)",
+COLLAPSED_CLASSES = {"Missed Calls",
                      "PayG - Clarification Provided",
                      "user.forced.logged.off",
                      "user.transferred.to.campaign"}
@@ -165,7 +167,7 @@ MIDDLE_ORDER = [
     "user.transferred.to.campaign",
 ]
 
-PINNED_BOTTOM = ["(Unclassified)"]
+PINNED_BOTTOM = ["Missed Calls"]
 
 
 def build_taxonomy():
