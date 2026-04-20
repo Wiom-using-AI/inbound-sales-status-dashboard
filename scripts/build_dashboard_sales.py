@@ -248,11 +248,20 @@ taxonomy = build_taxonomy()
 
 
 def write_month_sheet(ym):
+    from datetime import date as _date
+    today = _date.today()
+    is_current_month = (ym == (today.year, today.month))
+
     title = fmt_month(ym)
     ws = wb.create_sheet(title)
     ws.sheet_view.showGridLines = False
 
-    days_desc = month_dates_desc(ym)
+    # All days in month — for MTD avg and zero-check
+    all_days_in_month = sorted(by_month[ym], reverse=True)
+    all_days_set = set(all_days_in_month)
+    # Displayed columns: last 7 for current month, all for completed
+    days_desc = all_days_in_month[:7] if is_current_month else all_days_in_month
+
     prev_ym = (ym[0], ym[1] - 1) if ym[1] > 1 else (ym[0] - 1, 12)
     prev_days = sorted(by_month.get(prev_ym, []))
 
@@ -270,18 +279,34 @@ def write_month_sheet(ym):
 
     r = 2
     for cls, codes in taxonomy:
+        # Zero-row filter: skip class if no calls at all this month (current month only)
+        if is_current_month:
+            cls_month_total = sum(
+                n for (k_cls, _), dd in counts.items()
+                if k_cls == cls
+                for d, n in dd.items()
+                if d in all_days_set
+            )
+            if cls_month_total == 0:
+                continue
+
         class_day      = {d: 0 for d in days_desc}
         class_prev_day = {d: 0 for d in prev_days}
+        class_all_days = {d: 0 for d in all_days_in_month}
+
         for (k_cls, _k_code), dd in counts.items():
             if k_cls != cls:
                 continue
             for d, n in dd.items():
                 if d in class_day:
                     class_day[d] += n
+                if d in class_all_days:
+                    class_all_days[d] += n
                 if d in class_prev_day:
                     class_prev_day[d] += n
 
-        cls_mtd  = avg(class_day.values())
+        # MTD avg always over all days in month
+        cls_mtd  = avg(class_all_days.values())
         cls_prev = avg(class_prev_day.values())
 
         # --- class row ---
@@ -302,16 +327,23 @@ def write_month_sheet(ym):
                 cell.alignment = center
         r += 1
 
-        # --- code rows (sorted descending by MTD avg) ---
+        # --- code rows (sorted descending by full-month MTD avg) ---
         code_mtds = []
         for code in codes:
-            dv = {d: counts[(cls, code)].get(d, 0) for d in days_desc}
+            # Zero-filter individual codes for current month
+            if is_current_month:
+                code_month_total = sum(counts[(cls, code)].get(d, 0) for d in all_days_in_month)
+                if code_month_total == 0:
+                    continue
+            dv = {d: counts[(cls, code)].get(d, 0) for d in all_days_in_month}
             code_mtds.append((code, avg(dv.values())))
         code_mtds.sort(key=lambda x: x[1], reverse=True)
         for code, _ in code_mtds:
             day_vals  = {d: counts[(cls, code)].get(d, 0) for d in days_desc}
             prev_vals = {d: counts[(cls, code)].get(d, 0) for d in prev_days}
-            mtd  = avg(day_vals.values())
+            # MTD avg over all days in month
+            all_day_vals = {d: counts[(cls, code)].get(d, 0) for d in all_days_in_month}
+            mtd  = avg(all_day_vals.values())
             prev = avg(prev_vals.values())
 
             cell = ws.cell(row=r, column=1, value=code)
@@ -331,16 +363,19 @@ def write_month_sheet(ym):
                     cell.alignment = center
             r += 1
 
-    # TOTAL row
-    total_day = defaultdict(int)
-    total_prev_day = defaultdict(int)
+    # TOTAL row — MTD avg uses all days in month, display limited to days_desc
+    total_day       = defaultdict(int)   # displayed columns
+    total_all_days  = defaultdict(int)   # all days (for MTD avg)
+    total_prev_day  = defaultdict(int)
     for (cls, code), dd in counts.items():
         for d, n in dd.items():
             if d in set(days_desc):
                 total_day[d] += n
+            if d in all_days_set:
+                total_all_days[d] += n
             if d in set(prev_days):
                 total_prev_day[d] += n
-    total_mtd  = avg(total_day.values())
+    total_mtd  = avg(total_all_days.values())
     total_prev = avg(total_prev_day.values())
 
     ws.cell(row=r, column=1, value="TOTAL").font = Font(bold=True, color=BLACK)

@@ -206,7 +206,14 @@ def fmt_pct(val):
 
 def metrics_table(ym):
     """Build a small summary table: Call Volume, Missed Call, AHT per day."""
-    days_desc = sorted(by_month[ym], reverse=True)
+    today = date.today()
+    is_current_month = (ym == (today.year, today.month))
+
+    # All days in the month — used for MTD avg (always full MTD, not capped at 7)
+    all_days_in_month = sorted(by_month[ym], reverse=True)
+    # Displayed daily columns — last 7 days for current month, all days for completed
+    days_desc = all_days_in_month[:7] if is_current_month else all_days_in_month
+
     prev_ym = (ym[0], ym[1] - 1) if ym[1] > 1 else (ym[0] - 1, 12)
     prev_days = sorted(by_month.get(prev_ym, []))
     prev_label = f"{fmt_month(prev_ym)} Avg" if prev_days else "Prev Month Avg"
@@ -215,7 +222,7 @@ def metrics_table(ym):
     headers = ["Metrics", cur_avg_label, prev_label] + [d.strftime("%d-%b") for d in days_desc]
     thead = "<tr>" + "".join(f"<th>{html.escape(h)}</th>" for h in headers) + "</tr>"
 
-    # Gather per-day values
+    # Per-day values for displayed columns
     vol_day   = {d: metrics_by_date.get(d, {}).get("total", 0) for d in days_desc}
     miss_day  = {d: metrics_by_date.get(d, {}).get("missed", 0) for d in days_desc}
     aht_day   = {d: metrics_by_date.get(d, {}).get("aht", 0) for d in days_desc}
@@ -223,12 +230,16 @@ def metrics_table(ym):
     miss_prev = {d: metrics_by_date.get(d, {}).get("missed", 0) for d in prev_days}
     aht_prev  = {d: metrics_by_date.get(d, {}).get("aht", 0) for d in prev_days}
 
-    vol_mtd  = avg(vol_day.values())  if vol_day  else 0
-    vol_pavg = avg(vol_prev.values()) if vol_prev else 0
-    miss_mtd  = avg(miss_day.values())  if miss_day  else 0
+    # MTD avg always uses ALL days in month (not capped at 7)
+    _all_vol  = {d: metrics_by_date.get(d, {}).get("total", 0) for d in all_days_in_month}
+    _all_miss = {d: metrics_by_date.get(d, {}).get("missed", 0) for d in all_days_in_month}
+    _all_aht  = {d: metrics_by_date.get(d, {}).get("aht", 0) for d in all_days_in_month}
+    vol_mtd  = avg(_all_vol.values())  if _all_vol  else 0
+    vol_pavg = avg(vol_prev.values())  if vol_prev  else 0
+    miss_mtd  = avg(_all_miss.values()) if _all_miss else 0
     miss_pavg = avg(miss_prev.values()) if miss_prev else 0
-    aht_mtd  = avg(aht_day.values())  if aht_day  else 0
-    aht_pavg = avg(aht_prev.values()) if aht_prev else 0
+    aht_mtd  = avg(_all_aht.values())  if _all_aht  else 0
+    aht_pavg = avg(aht_prev.values())  if aht_prev  else 0
 
     # Missed call % per day
     misspct_day = {}
@@ -328,7 +339,15 @@ def metrics_table(ym):
 # ---------------------------------------------------------------- build month tables
 
 def month_table(ym):
-    days_desc = sorted(by_month[ym], reverse=True)
+    today = date.today()
+    is_current_month = (ym == (today.year, today.month))
+
+    # All days ever recorded in this month — used for MTD avg and zero-check
+    all_days_in_month = sorted(by_month[ym], reverse=True)
+    # Displayed columns: last 7 for current month, all for completed months
+    days_desc = all_days_in_month[:7] if is_current_month else all_days_in_month
+    all_days_set = set(all_days_in_month)
+
     prev_ym = (ym[0], ym[1] - 1) if ym[1] > 1 else (ym[0] - 1, 12)
     prev_days = sorted(by_month.get(prev_ym, []))
     prev_label = f"{fmt_month(prev_ym)} Avg" if prev_days else "Prev Month Avg"
@@ -350,14 +369,31 @@ def month_table(ym):
                 "ym": ym_str if scope != "prev" else prev_ym_str}
 
     for cls, codes in taxonomy:
+        # Zero-row filter: skip class entirely if it has no calls this month so far
+        if is_current_month:
+            cls_month_total = sum(
+                n for (k_cls, _), dd in counts.items()
+                if k_cls == cls
+                for d, n in dd.items()
+                if d in all_days_set
+            )
+            if cls_month_total == 0:
+                continue
+
+        # Displayed daily values (capped at 7 for current month)
         class_day      = {d: 0 for d in days_desc}
         class_prev_day = {d: 0 for d in prev_days}
+        # Full-month values for MTD avg (always uses all days, not capped)
+        class_all_days = {d: 0 for d in all_days_in_month}
+
         for (k_cls, _k_code), dd in counts.items():
             if k_cls != cls:
                 continue
             for d, n in dd.items():
                 if d in class_day:
                     class_day[d] += n
+                if d in class_all_days:
+                    class_all_days[d] += n
                 if d in class_prev_day:
                     class_prev_day[d] += n
                 ym_of_d = (d.year, d.month)
@@ -366,7 +402,8 @@ def month_table(ym):
                 if ym_of_d == prev_ym:
                     total_prev_day[d] += n
 
-        cls_mtd  = avg(class_day.values())
+        # MTD avg always computed over all days in month (not just 7)
+        cls_mtd  = avg(class_all_days.values())
         cls_prev = avg(class_prev_day.values())
 
         cls_id = html.escape(cls.replace(" ", "_").replace("(", "").replace(")", ""))
@@ -383,17 +420,24 @@ def month_table(ym):
                                    drill=mk_drill(cls, None, "day", d)))
         body_rows.append(f'<tr class="row-class">{"".join(cells)}</tr>')
 
-        # Sort codes descending by MTD Avg for cleaner view
+        # Sort codes descending by full-month MTD Avg for cleaner view
         code_mtds = []
         for code in codes:
-            dv = {d: counts[(cls, code)].get(d, 0) for d in days_desc}
+            # Zero-filter: skip codes with no calls this month for current month
+            if is_current_month:
+                code_month_total = sum(counts[(cls, code)].get(d, 0) for d in all_days_in_month)
+                if code_month_total == 0:
+                    continue
+            dv = {d: counts[(cls, code)].get(d, 0) for d in all_days_in_month}
             code_mtds.append((code, avg(dv.values())))
         code_mtds.sort(key=lambda x: x[1], reverse=True)
 
         for code, _ in code_mtds:
             day_vals  = {d: counts[(cls, code)].get(d, 0) for d in days_desc}
             prev_vals = {d: counts[(cls, code)].get(d, 0) for d in prev_days}
-            mtd  = avg(day_vals.values())
+            # MTD avg over all days in month (not capped at 7)
+            all_day_vals = {d: counts[(cls, code)].get(d, 0) for d in all_days_in_month}
+            mtd  = avg(all_day_vals.values())
             prev = avg(prev_vals.values())
 
             cells = [f'<td class="disp disp-code">{html.escape(code)}</td>']
