@@ -108,35 +108,39 @@ def build_where(cls: str, code: str, scope: str, day: str, ym: str) -> str:
     if cls == "Sales Queue":
         q = ",".join("'" + sql_quote(c) + "'" for c in SALES_SOURCE_CLASSES)
         wh.append(f"DISPOSITION_CLASS IN ({q})")
-    elif cls == "(Unclassified)":
+    elif cls in ("Missed Calls", "(Unclassified)"):
+        # Missed Calls = calls with null/empty disposition class
         wh.append("(DISPOSITION_CLASS IS NULL OR TRIM(DISPOSITION_CLASS) = '')")
     elif cls == "Booking Queue":
-        wh.append(f"DISPOSITION_CLASS = 'Booking Queue'")
+        wh.append("DISPOSITION_CLASS = 'Booking Queue'")
     elif cls:
         wh.append(f"DISPOSITION_CLASS = '{sql_quote(cls)}'")
 
-    if code and cls not in ("Sales Queue", "Booking Queue", "(Unclassified)"):
+    if code and cls not in ("Sales Queue", "Booking Queue", "Missed Calls", "(Unclassified)"):
         wh.append(f"DISPOSITION_CODE = '{sql_quote(code)}'")
 
     return " AND ".join(wh)
 
 
 def metabase_query_csv(sql: str):
-    """Use /api/dataset/csv to get ALL rows (no 2000-row cap)."""
+    """Use /api/dataset/csv to get ALL rows (no 2000-row cap).
+    Uses form-encoded body — same pattern as pull_ameyo_sales.py which is known to work.
+    """
     import csv as csv_mod, io
-    csv_url = METABASE_URL.replace("/api/dataset", "/api/dataset/csv")
-    payload = json.dumps({
+    csv_url = METABASE_URL + "/csv"   # https://metabase.wiom.in/api/dataset/csv
+    query_json = json.dumps({
         "database": DATABASE_ID,
         "type": "native",
         "native": {"query": sql},
-    }).encode()
+    })
+    body = urllib.parse.urlencode({"query": query_json}).encode()
     req = urllib.request.Request(
         csv_url,
-        data=payload,
+        data=body,
         method="POST",
         headers={
             "x-api-key": API_KEY or "",
-            "Content-Type": "application/json",
+            "Content-Type": "application/x-www-form-urlencoded",
         },
     )
     with urllib.request.urlopen(req, timeout=300) as r:
