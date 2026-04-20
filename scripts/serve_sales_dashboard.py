@@ -168,7 +168,9 @@ class Handler(SimpleHTTPRequestHandler):
     def handle_refresh(self):
         """Trigger a manual data refresh (pull + rebuild)."""
         import subprocess, threading
-        project_root = Path(__file__).resolve().parent.parent
+        project_root = Path(os.environ.get("DASHBOARD_ROOT",
+                    str(Path(__file__).resolve().parent.parent / "output" / "web_sales"))
+                    ).parent.parent
         scripts_dir = project_root / "scripts"
 
         def do_refresh():
