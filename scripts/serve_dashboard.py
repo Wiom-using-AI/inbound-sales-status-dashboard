@@ -108,21 +108,23 @@ def build_where(cls: str, code: str, scope: str, day: str, ym: str) -> str:
 
 
 def metabase_query_csv(sql: str):
-    """Use /api/dataset/csv to get ALL rows (no 2000-row cap)."""
+    """Use /api/dataset/csv to get ALL rows (no 2000-row cap).
+    Must use form-encoded body — Metabase CSV endpoint rejects JSON."""
     import csv as csv_mod, io
-    csv_url = METABASE_URL.replace("/api/dataset", "/api/dataset/csv")
-    payload = json.dumps({
+    csv_url = "https://metabase.wiom.in/api/dataset/csv"
+    query_json = json.dumps({
         "database": DATABASE_ID,
         "type": "native",
         "native": {"query": sql},
-    }).encode()
+    })
+    body = urllib.parse.urlencode({"query": query_json}).encode()
     req = urllib.request.Request(
         csv_url,
-        data=payload,
+        data=body,
         method="POST",
         headers={
             "x-api-key": API_KEY or "",
-            "Content-Type": "application/json",
+            "Content-Type": "application/x-www-form-urlencoded",
         },
     )
     with urllib.request.urlopen(req, timeout=300) as r:
