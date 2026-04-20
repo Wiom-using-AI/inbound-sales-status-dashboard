@@ -12,6 +12,12 @@
       "runtimeExecutable": "python",
       "runtimeArgs": ["scripts/serve_dashboard.py"],
       "port": 8765
+    },
+    {
+      "name": "sales-dashboard",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["scripts/serve_sales_dashboard.py"],
+      "port": 8766
     }
   ]
 }
