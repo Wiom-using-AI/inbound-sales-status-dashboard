@@ -260,7 +260,7 @@ def write_month_sheet(ym):
     all_days_in_month = sorted(by_month[ym], reverse=True)
     all_days_set = set(all_days_in_month)
     # Displayed columns: last 7 for current month, all for completed
-    days_desc = all_days_in_month[:7] if is_current_month else all_days_in_month
+    days_desc = all_days_in_month  # show all days 1st → today for current month; all days for completed
 
     prev_ym = (ym[0], ym[1] - 1) if ym[1] > 1 else (ym[0] - 1, 12)
     prev_days = sorted(by_month.get(prev_ym, []))
