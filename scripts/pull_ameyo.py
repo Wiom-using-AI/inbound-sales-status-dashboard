@@ -91,10 +91,7 @@ SELECT
   call_date,
   COUNT(*)                                             AS total_calls,
   SUM(CASE WHEN disposition_class = '(Unclassified)' THEN 1 ELSE 0 END)  AS missed_calls,
-  AVG(CASE
-      WHEN disposition_class NOT IN ('(Unclassified)', 'Incomplete Call',
-           'campaign.system.disposition', 'user.forced.logged.off')
-        AND talk_sec > 0
+  AVG(CASE WHEN talk_sec > 0
       THEN talk_sec + COALESCE(acw_sec, 0)
       END)                                             AS avg_aht_sec,
   COUNT(DISTINCT USER_ID)                              AS agents_logged
