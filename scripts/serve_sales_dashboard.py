@@ -109,14 +109,14 @@ def build_where(cls: str, code: str, scope: str, day: str, ym: str) -> str:
         q = ",".join("'" + sql_quote(c) + "'" for c in SALES_SOURCE_CLASSES)
         wh.append(f"DISPOSITION_CLASS IN ({q})")
     elif cls in ("Missed Calls", "(Unclassified)"):
-        # Missed Calls = calls with null/empty disposition class
         wh.append("(DISPOSITION_CLASS IS NULL OR TRIM(DISPOSITION_CLASS) = '')")
     elif cls == "Booking Queue":
         wh.append("DISPOSITION_CLASS = 'Booking Queue'")
     elif cls:
         wh.append(f"DISPOSITION_CLASS = '{sql_quote(cls)}'")
 
-    if code and cls not in ("Sales Queue", "Booking Queue", "Missed Calls", "(Unclassified)"):
+    # Always apply code filter when a specific sub-disposition is clicked
+    if code:
         wh.append(f"DISPOSITION_CODE = '{sql_quote(code)}'")
 
     return " AND ".join(wh)
