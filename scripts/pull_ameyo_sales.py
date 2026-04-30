@@ -65,11 +65,7 @@ WITH base AS (
     COALESCE(NULLIF(TRIM(DISPOSITION_CODE),  ''), '(Unclassified)') AS disposition_code
   FROM PROD_DB.PUBLIC.AMEYO_CALL_DETAILS_REPORT
   WHERE CALL_TYPE = 'inbound.call.dial'
-    AND (
-      (CALL_TIME::DATE < '2026-04-01' AND QUEUE_NAME IN ('sales_queue', 'booking_queue'))
-      OR
-      (CALL_TIME::DATE >= '2026-04-01' AND QUEUE_NAME = 'sales_queue')
-    )
+    AND QUEUE_NAME IN ('sales_queue', 'booking_queue')
 )
 SELECT call_date, disposition_class, disposition_code, COUNT(*) AS call_count
 FROM base
@@ -89,11 +85,7 @@ WITH base AS (
     USER_ID
   FROM PROD_DB.PUBLIC.AMEYO_CALL_DETAILS_REPORT
   WHERE CALL_TYPE = 'inbound.call.dial'
-    AND (
-      (CALL_TIME::DATE < '2026-04-01' AND QUEUE_NAME IN ('sales_queue', 'booking_queue'))
-      OR
-      (CALL_TIME::DATE >= '2026-04-01' AND QUEUE_NAME = 'sales_queue')
-    )
+    AND QUEUE_NAME IN ('sales_queue', 'booking_queue')
 )
 SELECT
   call_date,

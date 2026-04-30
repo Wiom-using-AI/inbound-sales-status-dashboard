@@ -887,8 +887,7 @@ footer {{ color: var(--muted); font-size: 11px; text-align: center; padding: 24p
   <h1>Inbound Summary &mdash; Sales &amp; Status Queue</h1>
   <div class="sub">
     Source: Metabase &middot; PROD_DB.PUBLIC.AMEYO_CALL_DETAILS_REPORT &middot;
-    Before Apr 2026: QUEUE_NAME IN (Sales Queue, Booking Queue) &middot;
-    From Apr 2026: QUEUE_NAME = Sales Queue &middot;
+    QUEUE_NAME IN (sales_queue, booking_queue) &middot;
     CALL_TYPE = inbound.call.dial
   </div>
   <div class="stats">
