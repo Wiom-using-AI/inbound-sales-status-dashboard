@@ -62,7 +62,21 @@ def sql_quote(s: str) -> str:
 
 def build_where(cls: str, code: str, scope: str, day: str, ym: str) -> str:
     """Return a SQL WHERE clause (without the leading WHERE)."""
-    queue_filter = "QUEUE_NAME IN ('sales_queue','booking_queue')"
+    # April 2026 onwards: sales_queue only; before April 2026: both queues
+    if scope == "day" and day:
+        d = date.fromisoformat(day)
+        if d >= date(2026, 4, 1):
+            queue_filter = "QUEUE_NAME = 'sales_queue'"
+        else:
+            queue_filter = "QUEUE_NAME IN ('sales_queue','booking_queue')"
+    elif scope in ("mtd", "prev") and ym:
+        y, m = ym.split("-")
+        if int(y) >= 2026 and int(m) >= 4:
+            queue_filter = "QUEUE_NAME = 'sales_queue'"
+        else:
+            queue_filter = "QUEUE_NAME IN ('sales_queue','booking_queue')"
+    else:
+        queue_filter = "QUEUE_NAME IN ('sales_queue','booking_queue')"
 
     wh = [
         queue_filter,
