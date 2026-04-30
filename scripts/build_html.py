@@ -853,7 +853,7 @@ footer {{ color: var(--muted); font-size: 11px; text-align: center; padding: 24p
   </div>
 </div>
 
-<footer>Wiom · Inbound Call Dashboard · auto-refreshed daily at 08:00 IST · Use "Refresh Now" button for manual update</footer>
+<footer>Wiom · Inbound Call Dashboard · auto-refreshed hourly 08:00–22:00 IST (incl. same-day live data) · Use "Refresh Now" for instant update</footer>
 
 <script>
 function manualRefresh(btn) {{

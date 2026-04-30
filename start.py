@@ -4,7 +4,9 @@ Reads DASHBOARD_MODE env var to decide which dashboard to serve:
   - "sales"   → Sales & Status Queue  (pull_ameyo_sales, build_html_sales, web_sales/)
   - (default) → Service Queue         (pull_ameyo, build_html, web/)
 
-A background thread re-pulls + rebuilds daily at the configured IST time.
+Refresh schedule:
+  - Every hour between 08:00–22:00 IST to show live same-day data
+  - DB is refreshed every 1hr, so dashboard stays in sync
 """
 import subprocess
 import sys
@@ -63,16 +65,25 @@ def refresh():
           "Daily refresh complete.", flush=True)
 
 
+def next_hourly_tick(now):
+    """Return next top-of-hour IST between 08:00 and 22:00."""
+    candidate = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+    # If next hour is outside active window, jump to 08:00 next day
+    if candidate.hour > 22:
+        candidate = (candidate + timedelta(days=1)).replace(hour=8, minute=0,
+                                                             second=0, microsecond=0)
+    elif candidate.hour < 8:
+        candidate = candidate.replace(hour=8, minute=0, second=0, microsecond=0)
+    return candidate
+
+
 def scheduler_loop():
     while True:
-        now    = datetime.now(IST)
-        target = now.replace(hour=REFRESH_HOUR, minute=REFRESH_MINUTE,
-                             second=0, microsecond=0)
-        if target <= now:
-            target += timedelta(days=1)
+        now      = datetime.now(IST)
+        target   = next_hourly_tick(now)
         wait_sec = (target - now).total_seconds()
         print(f"[scheduler] Next refresh at {target.strftime('%Y-%m-%d %H:%M')} IST "
-              f"(in {wait_sec/3600:.1f}h)", flush=True)
+              f"(in {wait_sec/60:.0f} min)", flush=True)
         time.sleep(wait_sec)
         try:
             refresh()
