@@ -60,20 +60,24 @@ def run_query(sql, out_path):
 SQL_COUNTS = """
 WITH base AS (
   SELECT
-    CALL_TIME::DATE AS call_date,
+    CONVERT_TIMEZONE('UTC', 'Asia/Kolkata', CALL_TIME)::DATE        AS call_date,
+    TO_TIME(CONVERT_TIMEZONE('UTC', 'Asia/Kolkata', CALL_TIME))     AS call_time_ist,
     COALESCE(NULLIF(TRIM(DISPOSITION_CLASS), ''), '(Unclassified)') AS disposition_class,
     COALESCE(NULLIF(TRIM(DISPOSITION_CODE),  ''), '(Unclassified)') AS disposition_code
   FROM PROD_DB.PUBLIC.AMEYO_CALL_DETAILS_REPORT
   WHERE CALL_TYPE = 'inbound.call.dial'
     AND (
-      (CALL_TIME::DATE < '2026-04-01' AND QUEUE_NAME IN ('sales_queue', 'booking_queue'))
+      (CONVERT_TIMEZONE('UTC', 'Asia/Kolkata', CALL_TIME)::DATE < '2026-04-01'
+        AND QUEUE_NAME IN ('sales_queue', 'booking_queue'))
       OR
-      (CALL_TIME::DATE >= '2026-04-01' AND QUEUE_NAME = 'sales_queue')
+      (CONVERT_TIMEZONE('UTC', 'Asia/Kolkata', CALL_TIME)::DATE >= '2026-04-01'
+        AND QUEUE_NAME = 'sales_queue')
     )
 )
 SELECT call_date, disposition_class, disposition_code, COUNT(*) AS call_count
 FROM base
 WHERE call_date >= '2026-02-01'
+  AND call_time_ist BETWEEN '09:00:00' AND '20:59:59'
 GROUP BY 1, 2, 3
 ORDER BY 1, 2, 3
 """
@@ -82,7 +86,8 @@ ORDER BY 1, 2, 3
 SQL_METRICS = """
 WITH base AS (
   SELECT
-    CALL_TIME::DATE AS call_date,
+    CONVERT_TIMEZONE('UTC', 'Asia/Kolkata', CALL_TIME)::DATE        AS call_date,
+    TO_TIME(CONVERT_TIMEZONE('UTC', 'Asia/Kolkata', CALL_TIME))     AS call_time_ist,
     COALESCE(NULLIF(TRIM(DISPOSITION_CLASS), ''), '(Unclassified)') AS disposition_class,
     DATEDIFF('second', '00:00:00'::TIME, TRY_TO_TIME(USER_TALK_TIME))  AS talk_sec,
     DATEDIFF('second', '00:00:00'::TIME, TRY_TO_TIME(ACW_DURATION))    AS acw_sec,
@@ -90,9 +95,11 @@ WITH base AS (
   FROM PROD_DB.PUBLIC.AMEYO_CALL_DETAILS_REPORT
   WHERE CALL_TYPE = 'inbound.call.dial'
     AND (
-      (CALL_TIME::DATE < '2026-04-01' AND QUEUE_NAME IN ('sales_queue', 'booking_queue'))
+      (CONVERT_TIMEZONE('UTC', 'Asia/Kolkata', CALL_TIME)::DATE < '2026-04-01'
+        AND QUEUE_NAME IN ('sales_queue', 'booking_queue'))
       OR
-      (CALL_TIME::DATE >= '2026-04-01' AND QUEUE_NAME = 'sales_queue')
+      (CONVERT_TIMEZONE('UTC', 'Asia/Kolkata', CALL_TIME)::DATE >= '2026-04-01'
+        AND QUEUE_NAME = 'sales_queue')
     )
 )
 SELECT
@@ -105,6 +112,7 @@ SELECT
   COUNT(DISTINCT USER_ID)                              AS agents_logged
 FROM base
 WHERE call_date >= '2026-02-01'
+  AND call_time_ist BETWEEN '09:00:00' AND '20:59:59'
 GROUP BY 1
 ORDER BY 1
 """

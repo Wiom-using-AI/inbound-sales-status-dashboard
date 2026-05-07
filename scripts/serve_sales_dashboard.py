@@ -78,17 +78,19 @@ def build_where(cls: str, code: str, scope: str, day: str, ym: str) -> str:
     else:
         queue_filter = "QUEUE_NAME IN ('sales_queue','booking_queue')"
 
+    # IST conversion expression (CALL_TIME stored in UTC)
+    IST = "CONVERT_TIMEZONE('UTC', 'Asia/Kolkata', CALL_TIME)"
+
     wh = [
         queue_filter,
         "CALL_TYPE = 'inbound.call.dial'",
+        # 9:00 AM – 9:00 PM IST only
+        f"TO_TIME({IST}) BETWEEN '09:00:00' AND '20:59:59'",
     ]
 
-    # --- date filter ---
+    # --- date filter (IST date) ---
     if scope == "day" and day:
-        wh.append(
-            "CALL_TIME::DATE "
-            f"= DATE '{day}'"
-        )
+        wh.append(f"{IST}::DATE = DATE '{day}'")
     elif scope in ("mtd", "prev") and ym:
         y, m = ym.split("-")
         start = date(int(y), int(m), 1)
@@ -97,10 +99,8 @@ def build_where(cls: str, code: str, scope: str, day: str, ym: str) -> str:
         else:
             end = date(int(y), int(m) + 1, 1)
         wh.append(
-            "CALL_TIME::DATE "
-            f">= DATE '{start.isoformat()}' AND "
-            "CALL_TIME::DATE "
-            f"<  DATE '{end.isoformat()}'"
+            f"{IST}::DATE >= DATE '{start.isoformat()}' AND "
+            f"{IST}::DATE <  DATE '{end.isoformat()}'"
         )
 
     # --- class / code filter ---
