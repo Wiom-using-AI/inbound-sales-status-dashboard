@@ -84,8 +84,6 @@ def build_where(cls: str, code: str, scope: str, day: str, ym: str) -> str:
     wh = [
         queue_filter,
         "CALL_TYPE = 'inbound.call.dial'",
-        # 9:00 AM – 9:00 PM IST only
-        f"TO_TIME({IST}) BETWEEN '09:00:00' AND '20:59:59'",
     ]
 
     # --- date filter (IST date) ---

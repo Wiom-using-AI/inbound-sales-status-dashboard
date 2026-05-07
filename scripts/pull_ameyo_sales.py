@@ -77,7 +77,6 @@ WITH base AS (
 SELECT call_date, disposition_class, disposition_code, COUNT(*) AS call_count
 FROM base
 WHERE call_date >= '2026-02-01'
-  AND call_time_ist BETWEEN '09:00:00' AND '20:59:59'
 GROUP BY 1, 2, 3
 ORDER BY 1, 2, 3
 """
@@ -112,7 +111,6 @@ SELECT
   COUNT(DISTINCT USER_ID)                              AS agents_logged
 FROM base
 WHERE call_date >= '2026-02-01'
-  AND call_time_ist BETWEEN '09:00:00' AND '20:59:59'
 GROUP BY 1
 ORDER BY 1
 """
