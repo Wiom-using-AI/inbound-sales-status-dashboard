@@ -533,14 +533,14 @@ mom_panel = f'''
     <span id="chartFilterNote" class="filter-note" style="display:none"></span>
   </div>
 
-  <div class="chart-wrap" style="position:relative; height:580px; width:100%;">
+  <div class="chart-wrap" style="position:relative; height:600px; width:100%; overflow:hidden;">
     <canvas id="momChart"></canvas>
   </div>
   {mom_table}
 
   <div style="margin-top:28px"></div>
 
-  <div class="chart-wrap" style="position:relative; height:580px; width:100%;">
+  <div class="chart-wrap" style="position:relative; height:600px; width:100%; overflow:hidden;">
     <canvas id="top10Chart"></canvas>
   </div>
   {top10_table}
@@ -1191,6 +1191,7 @@ function trendOpts(titleText, filter) {{
   return {{
     responsive: true,
     maintainAspectRatio: false,
+    devicePixelRatio: window.devicePixelRatio || 2,
     animation: {{ duration: 300 }},
     interaction: {{ mode: 'index', intersect: false }},
     plugins: {{
@@ -1237,16 +1238,9 @@ function trendOpts(titleText, filter) {{
 }}
 
 function _createChart(canvasId, datasets, title, filter) {{
-  const canvas = document.getElementById(canvasId);
-  /* Explicitly size the canvas at device-pixel resolution so text is sharp */
-  const dpr  = window.devicePixelRatio || 2;
-  const wrap  = canvas.parentElement;
-  canvas.style.width  = '100%';
-  canvas.style.height = '100%';
-  canvas.width  = wrap.clientWidth  * dpr;
-  canvas.height = wrap.clientHeight * dpr;
-  const ctx = canvas.getContext('2d');
-  ctx.scale(dpr, dpr);
+  /* Let Chart.js manage canvas sizing — devicePixelRatio in trendOpts
+     handles sharpness. Manual ctx.scale() breaks Chart.js responsive layout. */
+  const ctx = document.getElementById(canvasId).getContext('2d');
   return new Chart(ctx, {{
     type: 'line',
     data: {{ labels: MOM_MONTH_LABELS, datasets: datasets }},
