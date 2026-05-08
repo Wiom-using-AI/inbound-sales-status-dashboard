@@ -533,14 +533,14 @@ mom_panel = f'''
     <span id="chartFilterNote" class="filter-note" style="display:none"></span>
   </div>
 
-  <div class="chart-wrap" style="position:relative; height:700px; width:100%;">
+  <div class="chart-wrap" style="position:relative; height:520px; width:100%;">
     <canvas id="momChart"></canvas>
   </div>
   {mom_table}
 
   <div style="margin-top:28px"></div>
 
-  <div class="chart-wrap" style="position:relative; height:700px; width:100%;">
+  <div class="chart-wrap" style="position:relative; height:520px; width:100%;">
     <canvas id="top10Chart"></canvas>
   </div>
   {top10_table}
@@ -1123,118 +1123,121 @@ function openDrill(td) {{
     }});
 }}
 
-// ---- MoM charts (flipped axes: x=months, one line per class/code) ----
-const MOM_MONTH_LABELS  = {json.dumps(mom_month_labels)};
-const MOM_CAT_SERIES    = {json.dumps(mom_cat_series)};
-const MOM_CAT_COLORS    = {json.dumps(mom_cat_colors)};
-const TOP15_CODE_SERIES = {json.dumps(top15_code_series)};
-const TOP15_CODE_COLORS = {json.dumps(top15_code_colors)};
-const CODE_CLASS_MAP    = {json.dumps(code_class_map_js)};
+// ---- MoM charts — grouped bar: x=class, one bar-group per month ----
+const MOM_MONTH_LABELS  = {json.dumps(mom_month_labels)};   // ["Feb 2026","Mar 2026",…]
+const MOM_CAT_SERIES    = {json.dumps(mom_cat_series)};     // {{cls:[v_per_month]}}
+const TOP15_CODE_SERIES = {json.dumps(top15_code_series)};  // {{code:[v_per_month]}}
+const CODE_CLASS_MAP    = {json.dumps(code_class_map_js)};  // {{code:cls}}
 
-let chartInstance     = null;
+// Distinct colour per month (max ~6 months)
+const MONTH_COLORS = [
+  '#E91E8C','#1E88E5','#43A047','#FB8C00','#8E24AA','#00897B'
+];
+
+let chartInstance      = null;
 let top10ChartInstance = null;
-let _activeFilter     = '';   // '' = all
+let _activeFilter      = '';
 
-const CHART_OPTS_BASE = {{
-  responsive: true,
-  maintainAspectRatio: false,
-  devicePixelRatio: window.devicePixelRatio || 2,
-  animation: {{ duration: 300 }},
-  interaction: {{ mode: 'index', intersect: false }},
-  plugins: {{
-    legend: {{
-      position: 'bottom',
-      labels: {{ boxWidth: 13, padding: 14, font: {{ size: 12 }} }}
-    }}
-  }},
-  scales: {{
-    x: {{
-      ticks: {{ font: {{ size: 13, weight: '600' }}, color: '#222' }},
-      grid: {{ color: '#e8e8e8' }}
-    }},
-    y: {{
-      title: {{ display: true, text: 'Avg calls / day', font: {{ size: 12 }} }},
-      ticks: {{ font: {{ size: 12 }} }},
-      grid: {{ color: '#e8e8e8' }}
-    }}
-  }}
-}};
+/* Return x-axis labels for the category bar chart */
+function catLabels(filter) {{
+  const all = Object.keys(MOM_CAT_SERIES);
+  return filter ? all.filter(c => c === filter) : all;
+}}
+/* Return x-axis labels for the sub-code bar chart */
+function codeLabels(filter) {{
+  const all = Object.keys(TOP15_CODE_SERIES);
+  return filter ? all.filter(c => CODE_CLASS_MAP[c] === filter) : all;
+}}
 
-function buildCatDatasets(filter) {{
-  const entries = Object.entries(MOM_CAT_SERIES)
-    .filter(([cls]) => !filter || cls === filter);
-  const single = entries.length === 1;
-  return entries.map(([cls, data]) => ({{
-    label: cls,
-    data: data,
-    borderColor: MOM_CAT_COLORS[cls],
-    backgroundColor: MOM_CAT_COLORS[cls] + '28',
-    fill: single,
-    tension: 0.35,
-    borderWidth: single ? 3 : 2.5,
-    pointRadius: 6,
-    pointHoverRadius: 9,
-    pointBorderWidth: 2,
-    pointBackgroundColor: MOM_CAT_COLORS[cls],
+/* Build datasets for a grouped-bar chart.
+   series  = {{label:[v_per_month]}}
+   xlabels = ordered x-axis labels (subset when filtered)
+*/
+function buildBarDatasets(series, xlabels) {{
+  return MOM_MONTH_LABELS.map((month, mi) => ({{
+    label: month,
+    data: xlabels.map(lbl => (series[lbl] ? series[lbl][mi] : 0)),
+    backgroundColor: MONTH_COLORS[mi % MONTH_COLORS.length] + 'cc',
+    borderColor:     MONTH_COLORS[mi % MONTH_COLORS.length],
+    borderWidth: 1.5,
+    borderRadius: 4,
+    borderSkipped: false,
   }}));
 }}
 
-function buildCodeDatasets(filter) {{
-  const entries = Object.entries(TOP15_CODE_SERIES)
-    .filter(([code]) => !filter || CODE_CLASS_MAP[code] === filter);
-  const single = entries.length === 1;
-  return entries.map(([code, data]) => ({{
-    label: code,
-    data: data,
-    borderColor: TOP15_CODE_COLORS[code],
-    backgroundColor: TOP15_CODE_COLORS[code] + '28',
-    fill: single,
-    tension: 0.35,
-    borderWidth: single ? 3 : 2.5,
-    pointRadius: 6,
-    pointHoverRadius: 9,
-    pointBorderWidth: 2,
-    pointBackgroundColor: TOP15_CODE_COLORS[code],
-  }}));
+/* Common Chart.js options for a horizontal-readable bar chart */
+function barOpts(titleText, xlabels) {{
+  const rotated = xlabels.length > 4;
+  return {{
+    responsive: true,
+    maintainAspectRatio: false,
+    devicePixelRatio: window.devicePixelRatio || 2,
+    animation: {{ duration: 300 }},
+    interaction: {{ mode: 'index', intersect: false }},
+    plugins: {{
+      title: {{
+        display: true, text: titleText,
+        font: {{ size: 14, weight: 'bold' }}, padding: {{ bottom: 14 }}
+      }},
+      legend: {{
+        position: 'top',
+        labels: {{ boxWidth: 14, padding: 16, font: {{ size: 12 }} }}
+      }},
+      tooltip: {{ callbacks: {{ label: ctx => ' ' + ctx.dataset.label + ': ' + ctx.parsed.y }} }}
+    }},
+    scales: {{
+      x: {{
+        ticks: {{
+          autoSkip: false,
+          maxRotation: rotated ? 40 : 0,
+          minRotation: rotated ? 30 : 0,
+          font: {{ size: rotated ? 10 : 12 }},
+          color: '#333'
+        }},
+        grid: {{ display: false }}
+      }},
+      y: {{
+        title: {{ display: true, text: 'Avg calls / day', font: {{ size: 12 }} }},
+        ticks: {{ font: {{ size: 11 }} }},
+        grid: {{ color: '#ebebeb' }},
+        beginAtZero: true
+      }}
+    }}
+  }};
 }}
 
 function renderChart() {{
   setTimeout(function() {{
-    // Chart 1 — categories
+    const cl = catLabels(_activeFilter);
+    const kl = codeLabels(_activeFilter);
+
+    // ---- Chart 1: Categories ----
     if (!chartInstance) {{
       const ctx = document.getElementById('momChart').getContext('2d');
       chartInstance = new Chart(ctx, {{
-        type: 'line',
-        data: {{ labels: MOM_MONTH_LABELS, datasets: buildCatDatasets(_activeFilter) }},
-        options: Object.assign({{}}, CHART_OPTS_BASE, {{
-          plugins: Object.assign({{}}, CHART_OPTS_BASE.plugins, {{
-            title: {{ display: true,
-              text: 'M.o.M Avg Daily Inbound Calls — Category Wise',
-              font: {{ size: 14, weight: 'bold' }}, padding: {{ bottom: 12 }} }}
-          }})
-        }})
+        type: 'bar',
+        data: {{ labels: cl, datasets: buildBarDatasets(MOM_CAT_SERIES, cl) }},
+        options: barOpts('M.o.M Avg Daily Inbound Calls — Category Wise', cl)
       }});
     }} else {{
-      chartInstance.data.datasets = buildCatDatasets(_activeFilter);
+      chartInstance.data.labels   = cl;
+      chartInstance.data.datasets = buildBarDatasets(MOM_CAT_SERIES, cl);
+      Object.assign(chartInstance.options, barOpts('M.o.M Avg Daily Inbound Calls — Category Wise', cl));
       chartInstance.update();
     }}
 
-    // Chart 2 — sub-categories
+    // ---- Chart 2: Sub-categories ----
     if (!top10ChartInstance) {{
       const ctx2 = document.getElementById('top10Chart').getContext('2d');
       top10ChartInstance = new Chart(ctx2, {{
-        type: 'line',
-        data: {{ labels: MOM_MONTH_LABELS, datasets: buildCodeDatasets(_activeFilter) }},
-        options: Object.assign({{}}, CHART_OPTS_BASE, {{
-          plugins: Object.assign({{}}, CHART_OPTS_BASE.plugins, {{
-            title: {{ display: true,
-              text: 'M.o.M Avg Daily Inbound Calls — Top 15 Sub-categories',
-              font: {{ size: 14, weight: 'bold' }}, padding: {{ bottom: 12 }} }}
-          }})
-        }})
+        type: 'bar',
+        data: {{ labels: kl, datasets: buildBarDatasets(TOP15_CODE_SERIES, kl) }},
+        options: barOpts('M.o.M Avg Daily Inbound Calls — Top 15 Sub-categories', kl)
       }});
     }} else {{
-      top10ChartInstance.data.datasets = buildCodeDatasets(_activeFilter);
+      top10ChartInstance.data.labels   = kl;
+      top10ChartInstance.data.datasets = buildBarDatasets(TOP15_CODE_SERIES, kl);
+      Object.assign(top10ChartInstance.options, barOpts('M.o.M Avg Daily Inbound Calls — Top 15 Sub-categories', kl));
       top10ChartInstance.update();
     }}
   }}, 50);
@@ -1244,19 +1247,22 @@ function applyChartFilter(cls) {{
   _activeFilter = cls || '';
   const note = document.getElementById('chartFilterNote');
   if (_activeFilter) {{
-    note.textContent = 'Showing: ' + _activeFilter;
+    note.textContent = '📌 Filtered: ' + _activeFilter;
     note.style.display = '';
   }} else {{
     note.style.display = 'none';
   }}
-  if (chartInstance) {{
-    chartInstance.data.datasets = buildCatDatasets(_activeFilter);
-    chartInstance.update();
-  }}
-  if (top10ChartInstance) {{
-    top10ChartInstance.data.datasets = buildCodeDatasets(_activeFilter);
-    top10ChartInstance.update();
-  }}
+  if (!chartInstance) {{ renderChart(); return; }}
+  const cl = catLabels(_activeFilter);
+  const kl = codeLabels(_activeFilter);
+  chartInstance.data.labels   = cl;
+  chartInstance.data.datasets = buildBarDatasets(MOM_CAT_SERIES, cl);
+  Object.assign(chartInstance.options, barOpts('M.o.M Avg Daily Inbound Calls — Category Wise', cl));
+  chartInstance.update();
+  top10ChartInstance.data.labels   = kl;
+  top10ChartInstance.data.datasets = buildBarDatasets(TOP15_CODE_SERIES, kl);
+  Object.assign(top10ChartInstance.options, barOpts('M.o.M Avg Daily Inbound Calls — Top 15 Sub-categories', kl));
+  top10ChartInstance.update();
 }}
 </script>
 </body>
