@@ -533,14 +533,14 @@ mom_panel = f'''
     <span id="chartFilterNote" class="filter-note" style="display:none"></span>
   </div>
 
-  <div class="chart-wrap" style="position:relative; height:500px;">
+  <div class="chart-wrap" style="position:relative; height:700px; width:100%;">
     <canvas id="momChart"></canvas>
   </div>
   {mom_table}
 
   <div style="margin-top:28px"></div>
 
-  <div class="chart-wrap" style="position:relative; height:500px;">
+  <div class="chart-wrap" style="position:relative; height:700px; width:100%;">
     <canvas id="top10Chart"></canvas>
   </div>
   {top10_table}
@@ -839,8 +839,9 @@ table.metrics-dash td.num.avgcol {{ background: #C8E6C9 !important; }}
 .legend .pill {{ background: var(--grey-soft); padding: 3px 10px; border-radius: 10px;
   font-size: 11px; }}
 
-.chart-wrap {{ background: #fff; padding: 16px; border: 1px solid var(--grey);
-  border-radius: 8px; margin-bottom: 20px; box-shadow: 0 1px 4px rgba(0,0,0,.06); }}
+.chart-wrap {{ background: #fff; padding: 20px 24px 16px; border: 1px solid var(--grey);
+  border-radius: 8px; margin-bottom: 20px; box-shadow: 0 1px 4px rgba(0,0,0,.06);
+  box-sizing: border-box; width: 100%; }}
 
 /* chart filter bar */
 .chart-controls {{ display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
@@ -1138,45 +1139,63 @@ const CHART_OPTS_BASE = {{
   responsive: true,
   maintainAspectRatio: false,
   devicePixelRatio: window.devicePixelRatio || 2,
-  animation: {{ duration: 250 }},
+  animation: {{ duration: 300 }},
+  interaction: {{ mode: 'index', intersect: false }},
   plugins: {{
     legend: {{
-      position: 'right',
-      labels: {{ boxWidth: 12, padding: 10, font: {{ size: 11 }} }}
+      position: 'bottom',
+      labels: {{ boxWidth: 13, padding: 14, font: {{ size: 12 }} }}
     }}
   }},
   scales: {{
-    x: {{ ticks: {{ font: {{ size: 12 }}, color: '#333' }},
-         grid: {{ color: '#eee' }} }},
-    y: {{ title: {{ display: true, text: 'Avg calls / day', font: {{ size: 11 }} }},
-         ticks: {{ font: {{ size: 11 }} }}, grid: {{ color: '#eee' }} }}
+    x: {{
+      ticks: {{ font: {{ size: 13, weight: '600' }}, color: '#222' }},
+      grid: {{ color: '#e8e8e8' }}
+    }},
+    y: {{
+      title: {{ display: true, text: 'Avg calls / day', font: {{ size: 12 }} }},
+      ticks: {{ font: {{ size: 12 }} }},
+      grid: {{ color: '#e8e8e8' }}
+    }}
   }}
 }};
 
 function buildCatDatasets(filter) {{
-  return Object.entries(MOM_CAT_SERIES)
-    .filter(([cls]) => !filter || cls === filter)
-    .map(([cls, data]) => ({{
-      label: cls,
-      data: data,
-      borderColor: MOM_CAT_COLORS[cls],
-      backgroundColor: MOM_CAT_COLORS[cls] + '22',
-      tension: 0.3, borderWidth: 2.5, pointRadius: 5,
-      pointHoverRadius: 7,
-    }}));
+  const entries = Object.entries(MOM_CAT_SERIES)
+    .filter(([cls]) => !filter || cls === filter);
+  const single = entries.length === 1;
+  return entries.map(([cls, data]) => ({{
+    label: cls,
+    data: data,
+    borderColor: MOM_CAT_COLORS[cls],
+    backgroundColor: MOM_CAT_COLORS[cls] + '28',
+    fill: single,
+    tension: 0.35,
+    borderWidth: single ? 3 : 2.5,
+    pointRadius: 6,
+    pointHoverRadius: 9,
+    pointBorderWidth: 2,
+    pointBackgroundColor: MOM_CAT_COLORS[cls],
+  }}));
 }}
 
 function buildCodeDatasets(filter) {{
-  return Object.entries(TOP15_CODE_SERIES)
-    .filter(([code]) => !filter || CODE_CLASS_MAP[code] === filter)
-    .map(([code, data]) => ({{
-      label: code,
-      data: data,
-      borderColor: TOP15_CODE_COLORS[code],
-      backgroundColor: TOP15_CODE_COLORS[code] + '22',
-      tension: 0.3, borderWidth: 2.5, pointRadius: 5,
-      pointHoverRadius: 7,
-    }}));
+  const entries = Object.entries(TOP15_CODE_SERIES)
+    .filter(([code]) => !filter || CODE_CLASS_MAP[code] === filter);
+  const single = entries.length === 1;
+  return entries.map(([code, data]) => ({{
+    label: code,
+    data: data,
+    borderColor: TOP15_CODE_COLORS[code],
+    backgroundColor: TOP15_CODE_COLORS[code] + '28',
+    fill: single,
+    tension: 0.35,
+    borderWidth: single ? 3 : 2.5,
+    pointRadius: 6,
+    pointHoverRadius: 9,
+    pointBorderWidth: 2,
+    pointBackgroundColor: TOP15_CODE_COLORS[code],
+  }}));
 }}
 
 function renderChart() {{
