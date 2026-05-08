@@ -524,13 +524,21 @@ mom_panel = f'''
 <section id="tab-mom" class="tab-panel">
 
   <div class="chart-controls">
-    <label class="filter-label">&#9660; Filter charts by Disposition Class:</label>
+    <label class="filter-label">&#9660; Filter by Disposition Class:</label>
     <select id="chartClassFilter" onchange="applyChartFilter(this.value)">
       <option value="">— All Categories —</option>
       {chart_filter_options}
     </select>
     <button class="filter-clear-btn" onclick="document.getElementById('chartClassFilter').value='';applyChartFilter('')">&#10005; Clear</button>
     <span id="chartFilterNote" class="filter-note" style="display:none"></span>
+
+    <div class="view-toggle-group">
+      <span class="filter-label" style="margin-left:16px;">X-axis:</span>
+      <button class="view-toggle-btn active" id="btnByMonth"
+              onclick="setChartView('month')">By Month</button>
+      <button class="view-toggle-btn" id="btnByCat"
+              onclick="setChartView('category')">By Category</button>
+    </div>
   </div>
 
   <div class="chart-wrap" style="position:relative; height:600px; width:100%; overflow:hidden;">
@@ -857,6 +865,12 @@ table.metrics-dash td.num.avgcol {{ background: #C8E6C9 !important; }}
   transition: border-color .15s, color .15s; }}
 .filter-clear-btn:hover {{ border-color: var(--red); color: var(--red); }}
 .filter-note {{ font-size: 11px; color: var(--pink); font-weight: 600; }}
+.view-toggle-group {{ display: flex; align-items: center; gap: 4px; }}
+.view-toggle-btn {{ border: 1px solid var(--grey); border-radius: 6px;
+  padding: 5px 14px; font-size: 12px; font-weight: 600; cursor: pointer;
+  background: #fff; color: var(--muted); transition: all .15s; }}
+.view-toggle-btn.active {{ background: var(--pink); color: #fff; border-color: var(--pink); }}
+.view-toggle-btn:not(.active):hover {{ border-color: var(--pink); color: var(--pink); }}
 footer {{ color: var(--muted); font-size: 11px; text-align: center; padding: 24px;
   background: #fff; border-top: 1px solid var(--grey); }}
 
@@ -1123,71 +1137,100 @@ function openDrill(td) {{
     }});
 }}
 
-// ---- MoM TREND charts: x = months, one LINE per category ----
-// This shows whether each category is rising or falling over time.
+// ---- MoM TREND charts — supports two X-axis views ----
 const MOM_MONTH_LABELS  = {json.dumps(mom_month_labels)};   // ["Feb 2026","Mar 2026",…]
 const MOM_CAT_SERIES    = {json.dumps(mom_cat_series)};     // {{cls:[avg_feb,avg_mar,…]}}
 const MOM_CAT_COLORS    = {json.dumps(mom_cat_colors)};     // {{cls:"#hex"}}
 const TOP15_CODE_SERIES = {json.dumps(top15_code_series)};  // {{code:[avg_feb,…]}}
 const TOP15_CODE_COLORS = {json.dumps(top15_code_colors)};  // {{code:"#hex"}}
 const CODE_CLASS_MAP    = {json.dumps(code_class_map_js)};  // {{code:cls}}
+const MONTH_COLORS      = ['#E91E8C','#1E88E5','#43A047','#FB8C00','#8E24AA','#00897B'];
 
 let chartInstance      = null;
 let top10ChartInstance = null;
 let _activeFilter      = '';
+let _chartView         = 'month';   // 'month' | 'category'
 
-/* Build datasets for chart 1 (categories).
-   x = MOM_MONTH_LABELS, one dataset per category. */
-function buildCatDatasets(filter) {{
+// ── dataset builders ──────────────────────────────────────────────
+
+/* VIEW = month : x = months, one line per category */
+function buildByMonth_Cat(filter) {{
   const keys = filter
     ? Object.keys(MOM_CAT_SERIES).filter(c => c === filter)
     : Object.keys(MOM_CAT_SERIES);
   return keys.map(cls => {{
     const col = MOM_CAT_COLORS[cls] || '#888';
-    return {{
-      label: cls,
-      data: MOM_CAT_SERIES[cls],            // [avg_feb, avg_mar, …]
-      borderColor: col,
-      backgroundColor: col + '20',
-      borderWidth: 3,
-      tension: 0.3,
-      pointRadius: 8,
-      pointHoverRadius: 11,
-      pointBorderWidth: 2.5,
-      pointBackgroundColor: '#fff',
-      pointBorderColor: col,
-      fill: false,
-    }};
+    return {{ label: cls, data: MOM_CAT_SERIES[cls],
+      borderColor: col, backgroundColor: col+'20',
+      borderWidth: 3, tension: 0.3,
+      pointRadius: 8, pointHoverRadius: 11, pointBorderWidth: 2.5,
+      pointBackgroundColor: '#fff', pointBorderColor: col, fill: false }};
   }});
 }}
-
-/* Build datasets for chart 2 (sub-codes). */
-function buildCodeDatasets(filter) {{
+function buildByMonth_Code(filter) {{
   const keys = filter
     ? Object.keys(TOP15_CODE_SERIES).filter(c => CODE_CLASS_MAP[c] === filter)
     : Object.keys(TOP15_CODE_SERIES);
   return keys.map(code => {{
     const col = TOP15_CODE_COLORS[code] || '#888';
-    return {{
-      label: code,
-      data: TOP15_CODE_SERIES[code],
-      borderColor: col,
-      backgroundColor: col + '20',
-      borderWidth: 3,
-      tension: 0.3,
-      pointRadius: 8,
-      pointHoverRadius: 11,
-      pointBorderWidth: 2.5,
-      pointBackgroundColor: '#fff',
-      pointBorderColor: col,
-      fill: false,
-    }};
+    return {{ label: code, data: TOP15_CODE_SERIES[code],
+      borderColor: col, backgroundColor: col+'20',
+      borderWidth: 3, tension: 0.3,
+      pointRadius: 8, pointHoverRadius: 11, pointBorderWidth: 2.5,
+      pointBackgroundColor: '#fff', pointBorderColor: col, fill: false }};
   }});
 }}
 
-/* Chart.js options.  filter='' means "all" → legend at bottom;
-   filter set → legend at top (only 1 item). */
-function trendOpts(titleText, filter) {{
+/* VIEW = category : x = categories, one line per month */
+function buildByCat_Cat(filter) {{
+  const cats = filter
+    ? Object.keys(MOM_CAT_SERIES).filter(c => c === filter)
+    : Object.keys(MOM_CAT_SERIES);
+  return MOM_MONTH_LABELS.map((month, mi) => {{
+    const col = MONTH_COLORS[mi % MONTH_COLORS.length];
+    return {{ label: month,
+      data: cats.map(cls => MOM_CAT_SERIES[cls] ? MOM_CAT_SERIES[cls][mi] : 0),
+      borderColor: col, backgroundColor: col+'20',
+      borderWidth: 3, tension: 0.3,
+      pointRadius: 8, pointHoverRadius: 11, pointBorderWidth: 2.5,
+      pointBackgroundColor: '#fff', pointBorderColor: col, fill: false }};
+  }});
+}}
+function buildByCat_Code(filter) {{
+  const codes = filter
+    ? Object.keys(TOP15_CODE_SERIES).filter(c => CODE_CLASS_MAP[c] === filter)
+    : Object.keys(TOP15_CODE_SERIES);
+  return MOM_MONTH_LABELS.map((month, mi) => {{
+    const col = MONTH_COLORS[mi % MONTH_COLORS.length];
+    return {{ label: month,
+      data: codes.map(code => TOP15_CODE_SERIES[code] ? TOP15_CODE_SERIES[code][mi] : 0),
+      borderColor: col, backgroundColor: col+'20',
+      borderWidth: 3, tension: 0.3,
+      pointRadius: 8, pointHoverRadius: 11, pointBorderWidth: 2.5,
+      pointBackgroundColor: '#fff', pointBorderColor: col, fill: false }};
+  }});
+}}
+
+// ── helpers that pick the right builder ──────────────────────────
+function getLabels(view, filter, isCode) {{
+  if (view === 'month') return MOM_MONTH_LABELS;
+  const series = isCode ? TOP15_CODE_SERIES : MOM_CAT_SERIES;
+  const all = Object.keys(series);
+  if (!filter) return all;
+  return isCode
+    ? all.filter(c => CODE_CLASS_MAP[c] === filter)
+    : all.filter(c => c === filter);
+}}
+function getDatasets(view, filter, isCode) {{
+  if (view === 'month') return isCode ? buildByMonth_Code(filter) : buildByMonth_Cat(filter);
+  return isCode ? buildByCat_Code(filter) : buildByCat_Cat(filter);
+}}
+
+// ── Chart.js options ─────────────────────────────────────────────
+function trendOpts(titleText, view, filter, isCode) {{
+  const xLabels   = getLabels(view, filter, isCode);
+  const manyX     = xLabels.length > 5;
+  const fewSeries = (view === 'month' && !!filter) || (view === 'category');
   return {{
     responsive: true,
     maintainAspectRatio: false,
@@ -1197,20 +1240,16 @@ function trendOpts(titleText, filter) {{
     plugins: {{
       title: {{
         display: true, text: titleText,
-        font: {{ size: 15, weight: 'bold' }},
-        color: '#111', padding: {{ bottom: 18 }}
+        font: {{ size: 15, weight: 'bold' }}, color: '#111',
+        padding: {{ bottom: 18 }}
       }},
       legend: {{
-        position: filter ? 'top' : 'bottom',
-        labels: {{
-          boxWidth: 14, padding: 14,
-          font: {{ size: 12 }}, color: '#222'
-        }}
+        position: fewSeries ? 'top' : 'bottom',
+        labels: {{ boxWidth: 14, padding: 14, font: {{ size: 12 }}, color: '#222' }}
       }},
       tooltip: {{
-        titleFont:  {{ size: 13, weight: 'bold' }},
-        bodyFont:   {{ size: 12 }},
-        padding: 10,
+        titleFont: {{ size: 13, weight: 'bold' }},
+        bodyFont:  {{ size: 12 }}, padding: 10,
         callbacks: {{
           label: ctx => '  ' + ctx.dataset.label + ': ' + Math.round(ctx.parsed.y)
         }}
@@ -1219,16 +1258,15 @@ function trendOpts(titleText, filter) {{
     scales: {{
       x: {{
         ticks: {{
-          font: {{ size: 14, weight: '700' }},
-          color: '#222', maxRotation: 0, minRotation: 0
+          autoSkip: false,
+          maxRotation: manyX ? 40 : 0, minRotation: manyX ? 30 : 0,
+          font: {{ size: manyX ? 11 : 14, weight: '700' }}, color: '#222'
         }},
         grid: {{ color: '#e6e6e6' }}
       }},
       y: {{
-        title: {{
-          display: true, text: 'Avg calls / day',
-          font: {{ size: 13 }}, color: '#555'
-        }},
+        title: {{ display: true, text: 'Avg calls / day',
+                  font: {{ size: 13 }}, color: '#555' }},
         ticks: {{ font: {{ size: 12 }}, color: '#444' }},
         grid:  {{ color: '#e6e6e6' }},
         beginAtZero: true
@@ -1237,43 +1275,37 @@ function trendOpts(titleText, filter) {{
   }};
 }}
 
-function _createChart(canvasId, datasets, title, filter) {{
-  /* Let Chart.js manage canvas sizing — devicePixelRatio in trendOpts
-     handles sharpness. Manual ctx.scale() breaks Chart.js responsive layout. */
+// ── chart create / update ─────────────────────────────────────────
+function _makeChart(canvasId, view, filter, isCode, title) {{
   const ctx = document.getElementById(canvasId).getContext('2d');
   return new Chart(ctx, {{
     type: 'line',
-    data: {{ labels: MOM_MONTH_LABELS, datasets: datasets }},
-    options: trendOpts(title, filter)
+    data: {{ labels: getLabels(view, filter, isCode),
+             datasets: getDatasets(view, filter, isCode) }},
+    options: trendOpts(title, view, filter, isCode)
   }});
 }}
+function _updateChart(inst, view, filter, isCode, title) {{
+  inst.data.labels   = getLabels(view, filter, isCode);
+  inst.data.datasets = getDatasets(view, filter, isCode);
+  Object.assign(inst.options, trendOpts(title, view, filter, isCode));
+  inst.update();
+}}
+
+const CAT_TITLE  = 'M.o.M Avg Daily Inbound Calls \u2014 Category Wise';
+const CODE_TITLE = 'M.o.M Avg Daily Inbound Calls \u2014 Top 15 Sub-categories';
 
 function renderChart() {{
   setTimeout(function() {{
     if (!chartInstance) {{
-      chartInstance = _createChart(
-        'momChart',
-        buildCatDatasets(_activeFilter),
-        'M.o.M Avg Daily Inbound Calls — Category Wise',
-        _activeFilter
-      );
+      chartInstance = _makeChart('momChart', _chartView, _activeFilter, false, CAT_TITLE);
     }} else {{
-      chartInstance.data.datasets = buildCatDatasets(_activeFilter);
-      Object.assign(chartInstance.options, trendOpts('M.o.M Avg Daily Inbound Calls — Category Wise', _activeFilter));
-      chartInstance.update();
+      _updateChart(chartInstance, _chartView, _activeFilter, false, CAT_TITLE);
     }}
-
     if (!top10ChartInstance) {{
-      top10ChartInstance = _createChart(
-        'top10Chart',
-        buildCodeDatasets(_activeFilter),
-        'M.o.M Avg Daily Inbound Calls — Top 15 Sub-categories',
-        _activeFilter
-      );
+      top10ChartInstance = _makeChart('top10Chart', _chartView, _activeFilter, true, CODE_TITLE);
     }} else {{
-      top10ChartInstance.data.datasets = buildCodeDatasets(_activeFilter);
-      Object.assign(top10ChartInstance.options, trendOpts('M.o.M Avg Daily Inbound Calls — Top 15 Sub-categories', _activeFilter));
-      top10ChartInstance.update();
+      _updateChart(top10ChartInstance, _chartView, _activeFilter, true, CODE_TITLE);
     }}
   }}, 80);
 }}
@@ -1284,12 +1316,17 @@ function applyChartFilter(cls) {{
   note.textContent = _activeFilter ? 'Filtered: ' + _activeFilter : '';
   note.style.display = _activeFilter ? '' : 'none';
   if (!chartInstance) {{ renderChart(); return; }}
-  chartInstance.data.datasets = buildCatDatasets(_activeFilter);
-  Object.assign(chartInstance.options, trendOpts('M.o.M Avg Daily Inbound Calls — Category Wise', _activeFilter));
-  chartInstance.update();
-  top10ChartInstance.data.datasets = buildCodeDatasets(_activeFilter);
-  Object.assign(top10ChartInstance.options, trendOpts('M.o.M Avg Daily Inbound Calls — Top 15 Sub-categories', _activeFilter));
-  top10ChartInstance.update();
+  _updateChart(chartInstance,     _chartView, _activeFilter, false, CAT_TITLE);
+  _updateChart(top10ChartInstance,_chartView, _activeFilter, true,  CODE_TITLE);
+}}
+
+function setChartView(view) {{
+  _chartView = view;
+  document.getElementById('btnByMonth').classList.toggle('active', view === 'month');
+  document.getElementById('btnByCat').classList.toggle('active', view === 'category');
+  if (!chartInstance) {{ renderChart(); return; }}
+  _updateChart(chartInstance,     _chartView, _activeFilter, false, CAT_TITLE);
+  _updateChart(top10ChartInstance,_chartView, _activeFilter, true,  CODE_TITLE);
 }}
 </script>
 </body>
