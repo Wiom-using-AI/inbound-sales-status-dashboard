@@ -43,10 +43,11 @@ if SRC_METRICS.exists():
     for mr in csv.DictReader(SRC_METRICS.open()):
         d = date.fromisoformat(mr["CALL_DATE"])
         metrics_by_date[d] = {
-            "total":  int(mr["TOTAL_CALLS"]),
-            "missed": int(mr["MISSED_CALLS"]),
-            "aht":    float(mr["AVG_AHT_SEC"]),
-            "agents": int(mr.get("AGENTS_LOGGED", 0)),
+            "total":      int(mr["TOTAL_CALLS"]),
+            "missed":     int(mr["MISSED_CALLS"]),
+            "aht":        float(mr["AVG_AHT_SEC"]),
+            "agents":     int(mr.get("AGENTS_LOGGED", 0)),
+            "queue_wait": float(mr.get("AVG_QUEUE_WAIT_SEC") or 0),
         }
 
 CLASS_MERGE_EXACT = {
@@ -298,7 +299,20 @@ def metrics_table(ym):
         cells.append(f'<td class="num">{agents_day.get(d, 0)}</td>')
     rows_html.append(f'<tr class="row-class">{"".join(cells)}</tr>')
 
-    # Row 5: Transferred % = user.transferred.to.aq / Total calls
+    # Row 5: Avg Queue Wait (IVR_TIME — time in queue before agent picks up)
+    qwait_day  = {d: metrics_by_date.get(d, {}).get("queue_wait", 0) for d in days_desc}
+    qwait_prev = {d: metrics_by_date.get(d, {}).get("queue_wait", 0) for d in prev_days}
+    _all_qwait = {d: metrics_by_date.get(d, {}).get("queue_wait", 0) for d in all_days_in_month}
+    qwait_mtd  = avg(_all_qwait.values()) if _all_qwait else 0
+    qwait_pavg = avg(qwait_prev.values()) if qwait_prev else 0
+    cells = ['<td class="disp disp-class">Avg Queue Wait</td>']
+    cells.append(f'<td class="num mtd avgcol">{fmt_aht(qwait_mtd)}</td>')
+    cells.append(f'<td class="num prev avgcol">{fmt_aht(qwait_pavg)}</td>')
+    for d in days_desc:
+        cells.append(f'<td class="num">{fmt_aht(qwait_day.get(d, 0))}</td>')
+    rows_html.append(f'<tr class="row-class">{"".join(cells)}</tr>')
+
+    # Row 6: Transferred % = user.transferred.to.aq / Total calls
     # Pull transferred counts from the disposition counts dict (code-level lookup)
     trans_day  = {}
     trans_prev = {}

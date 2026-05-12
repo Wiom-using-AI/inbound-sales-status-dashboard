@@ -90,6 +90,7 @@ WITH base AS (
     COALESCE(NULLIF(TRIM(DISPOSITION_CLASS), ''), '(Unclassified)') AS disposition_class,
     DATEDIFF('second', '00:00:00'::TIME, TRY_TO_TIME(USER_TALK_TIME))  AS talk_sec,
     DATEDIFF('second', '00:00:00'::TIME, TRY_TO_TIME(ACW_DURATION))    AS acw_sec,
+    DATEDIFF('second', '00:00:00'::TIME, TRY_TO_TIME(IVR_TIME))        AS queue_wait_sec,
     USER_ID
   FROM PROD_DB.PUBLIC.AMEYO_CALL_DETAILS_REPORT
   WHERE CALL_TYPE = 'inbound.call.dial'
@@ -108,7 +109,8 @@ SELECT
   AVG(CASE WHEN disposition_class != '(Unclassified)'
       THEN COALESCE(talk_sec, 0) + COALESCE(acw_sec, 0)
       END)                                             AS avg_aht_sec,
-  COUNT(DISTINCT USER_ID)                              AS agents_logged
+  COUNT(DISTINCT USER_ID)                              AS agents_logged,
+  AVG(COALESCE(queue_wait_sec, 0))                     AS avg_queue_wait_sec
 FROM base
 WHERE call_date >= '2026-02-01'
 GROUP BY 1
