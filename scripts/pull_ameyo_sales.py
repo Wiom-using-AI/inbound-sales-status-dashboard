@@ -60,18 +60,15 @@ def run_query(sql, out_path):
 SQL_COUNTS = """
 WITH base AS (
   SELECT
-    CONVERT_TIMEZONE('UTC', 'Asia/Kolkata', CALL_TIME)::DATE        AS call_date,
-    TO_TIME(CONVERT_TIMEZONE('UTC', 'Asia/Kolkata', CALL_TIME))     AS call_time_ist,
+    CALL_TIME::DATE                                                  AS call_date,
     COALESCE(NULLIF(TRIM(DISPOSITION_CLASS), ''), '(Unclassified)') AS disposition_class,
     COALESCE(NULLIF(TRIM(DISPOSITION_CODE),  ''), '(Unclassified)') AS disposition_code
   FROM PROD_DB.PUBLIC.AMEYO_CALL_DETAILS_REPORT
   WHERE CALL_TYPE = 'inbound.call.dial'
     AND (
-      (CONVERT_TIMEZONE('UTC', 'Asia/Kolkata', CALL_TIME)::DATE < '2026-04-01'
-        AND QUEUE_NAME IN ('sales_queue', 'booking_queue'))
+      (CALL_TIME::DATE < '2026-04-01' AND QUEUE_NAME IN ('sales_queue', 'booking_queue'))
       OR
-      (CONVERT_TIMEZONE('UTC', 'Asia/Kolkata', CALL_TIME)::DATE >= '2026-04-01'
-        AND QUEUE_NAME = 'sales_queue')
+      (CALL_TIME::DATE >= '2026-04-01' AND QUEUE_NAME = 'sales_queue')
     )
 )
 SELECT call_date, disposition_class, disposition_code, COUNT(*) AS call_count
@@ -85,8 +82,7 @@ ORDER BY 1, 2, 3
 SQL_METRICS = """
 WITH base AS (
   SELECT
-    CONVERT_TIMEZONE('UTC', 'Asia/Kolkata', CALL_TIME)::DATE        AS call_date,
-    TO_TIME(CONVERT_TIMEZONE('UTC', 'Asia/Kolkata', CALL_TIME))     AS call_time_ist,
+    CALL_TIME::DATE                                                  AS call_date,
     COALESCE(NULLIF(TRIM(DISPOSITION_CLASS), ''), '(Unclassified)') AS disposition_class,
     DATEDIFF('second', '00:00:00'::TIME, TRY_TO_TIME(USER_TALK_TIME))  AS talk_sec,
     DATEDIFF('second', '00:00:00'::TIME, TRY_TO_TIME(ACW_DURATION))    AS acw_sec,
@@ -95,11 +91,9 @@ WITH base AS (
   FROM PROD_DB.PUBLIC.AMEYO_CALL_DETAILS_REPORT
   WHERE CALL_TYPE = 'inbound.call.dial'
     AND (
-      (CONVERT_TIMEZONE('UTC', 'Asia/Kolkata', CALL_TIME)::DATE < '2026-04-01'
-        AND QUEUE_NAME IN ('sales_queue', 'booking_queue'))
+      (CALL_TIME::DATE < '2026-04-01' AND QUEUE_NAME IN ('sales_queue', 'booking_queue'))
       OR
-      (CONVERT_TIMEZONE('UTC', 'Asia/Kolkata', CALL_TIME)::DATE >= '2026-04-01'
-        AND QUEUE_NAME = 'sales_queue')
+      (CALL_TIME::DATE >= '2026-04-01' AND QUEUE_NAME = 'sales_queue')
     )
 )
 SELECT
