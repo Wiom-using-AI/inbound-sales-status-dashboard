@@ -864,6 +864,19 @@ for ym in months_sorted:
 per_tab_misspct["tab-mom"] = round(avg(all_pcts), 1) if all_pcts else 0
 per_tab_aht["tab-mom"] = fmt_aht(avg(all_ahts_sec)) if all_ahts_sec else "0:00"
 
+# Current tab — today's live totals from metrics
+_ct_today = date.today()
+if _ct_today in metrics_by_date:
+    _ct_total  = metrics_by_date[_ct_today]["total"]
+    _ct_missed = metrics_by_date[_ct_today]["missed"]
+    per_tab_totals["tab-current"]  = _ct_total
+    per_tab_misspct["tab-current"] = round(
+        (_ct_missed / _ct_total * 100) if _ct_total else 0, 1)
+else:
+    per_tab_totals["tab-current"]  = 0
+    per_tab_misspct["tab-current"] = 0.0
+per_tab_aht["tab-current"] = ""   # AHT hidden for Current tab
+
 # ---------------------------------------------------------------- highlights
 # Per-tab highlights: for each display month, find top spikes on the latest day.
 
@@ -1270,11 +1283,13 @@ const PER_TAB_TOTALS = {json.dumps(per_tab_totals)};
 const CODES_PER_TAB  = {json.dumps(codes_per_tab)};
 const PER_TAB_MISSPCT = {json.dumps(per_tab_misspct)};
 const PER_TAB_AHT    = {json.dumps(per_tab_aht)};
-const statTotal = document.getElementById('stat-total');
+const statTotal      = document.getElementById('stat-total');
 const statTotalLabel = document.getElementById('stat-total-label');
-const statCodes = document.getElementById('stat-codes');
-const statMiss  = document.getElementById('stat-miss');
-const statAht   = document.getElementById('stat-aht');
+const statCodes      = document.getElementById('stat-codes');
+const statMiss       = document.getElementById('stat-miss');
+const statMissLabel  = document.getElementById('stat-miss-label');
+const statAht        = document.getElementById('stat-aht');
+const statAhtCard    = statAht.closest('.stat-card');
 
 function fmtNum(n) {{ return (n || 0).toLocaleString('en-IN'); }}
 
@@ -1284,17 +1299,28 @@ function activate(id) {{
   buttons.forEach(b => b.classList.toggle('active', b.dataset.target === id));
   panels.forEach (p => p.classList.toggle('active', p.id === id));
   try {{ localStorage.setItem('wiom.dash.tab', id); }} catch(e) {{}}
-  // per-tab stats
-  if (id === 'tab-mom') {{
-    statTotalLabel.textContent = 'Total Inbound Calls (All Months)';
+
+  // ---- per-tab header stats ----
+  if (id === 'tab-current') {{
+    statTotalLabel.textContent = 'Total Inbound Calls (Today)';
+    if (statMissLabel) statMissLabel.textContent = 'Missed Call % (Today)';
+    statAhtCard.style.display = 'none';          // hide AHT for Current tab
   }} else {{
-    const label = document.querySelector('.tab-btn[data-target="' + id + '"]').textContent;
-    statTotalLabel.textContent = 'Total Inbound Calls (' + label + ')';
+    if (statMissLabel) statMissLabel.textContent = 'Missed Call % (MTD)';
+    statAhtCard.style.display = '';              // restore AHT for other tabs
+    if (id === 'tab-mom') {{
+      statTotalLabel.textContent = 'Total Inbound Calls (All Months)';
+    }} else {{
+      const label = document.querySelector('.tab-btn[data-target="' + id + '"]').textContent;
+      statTotalLabel.textContent = 'Total Inbound Calls (' + label + ')';
+    }}
   }}
+
   statTotal.textContent = fmtNum(PER_TAB_TOTALS[id] || 0);
   if (CODES_PER_TAB[id] !== undefined) statCodes.textContent = CODES_PER_TAB[id];
   statMiss.textContent = (PER_TAB_MISSPCT[id] !== undefined) ? PER_TAB_MISSPCT[id] + '%' : '-';
   statAht.textContent  = PER_TAB_AHT[id] || '-';
+
   // toggle highlight bars per tab
   document.querySelectorAll('.hl-tab').forEach(el => {{
     el.classList.toggle('active', el.dataset.tab === id);
