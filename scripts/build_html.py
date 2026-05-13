@@ -26,9 +26,12 @@ from datetime import date, datetime
 from pathlib import Path
 
 import os as _os
+from datetime import timezone, timedelta as _td
 _BASE = Path(__file__).resolve().parent.parent
-SRC = Path(_os.environ.get("DATA_DIR", str(_BASE / "data"))) / "ameyo_daily.csv"
-SRC_METRICS = Path(_os.environ.get("DATA_DIR", str(_BASE / "data"))) / "ameyo_metrics.csv"
+_DATA = Path(_os.environ.get("DATA_DIR", str(_BASE / "data")))
+SRC         = _DATA / "ameyo_daily.csv"
+SRC_METRICS = _DATA / "ameyo_metrics.csv"
+SRC_HOURLY  = _DATA / "ameyo_hourly.csv"
 OUT_DIR = _BASE / "output" / "web"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 OUT = OUT_DIR / "index.html"
@@ -48,6 +51,19 @@ if SRC_METRICS.exists():
             "aht":    float(mr["AVG_AHT_SEC"]),
             "agents": int(mr.get("AGENTS_LOGGED", 0)),
         }
+
+# Load hourly data: hourly_raw[date][hour][cls] = count
+_IST = timezone(_td(hours=5, minutes=30))
+_NOW_IST = datetime.now(_IST)
+CURR_HOUR_IST = _NOW_IST.hour
+
+hourly_raw = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
+if SRC_HOURLY.exists():
+    for _hr in csv.DictReader(SRC_HOURLY.open()):
+        _d  = date.fromisoformat(_hr["CALL_DATE"])
+        _h  = int(_hr["CALL_HOUR"])
+        _cl = _hr["DISPOSITION_CLASS"]
+        hourly_raw[_d][_h][_cl] += int(_hr["CALL_COUNT"])
 
 CLASS_MERGE_EXACT = {
     "Sales-App Issues":                 "Sales Queue",
@@ -509,6 +525,231 @@ top10_head = "<tr>" + "<th>Sub-category Issue</th>" + "".join(
 ) + "</tr>"
 top10_table = f'<table class="dash"><thead>{top10_head}</thead><tbody>{"".join(top10_rows)}</tbody></table>'
 
+# ---------------------------------------------------------------- Current tab
+
+def build_current_tab():
+    TODAY   = date.today()
+    HOURS   = list(range(8, 23))          # 08:00 – 22:00
+
+    past_days      = sorted(d for d in hourly_raw if d < TODAY)[-7:]
+    past_days_desc = list(reversed(past_days))   # most-recent first for table cols
+
+    if not past_days:
+        return ('<div style="padding:40px;color:#888;font-style:italic">'
+                'Hourly data not yet available — click Refresh Now.</div>')
+
+    today_data = hourly_raw.get(TODAY, {})
+
+    def h_total(d, h):
+        return sum(hourly_raw[d].get(h, {}).values())
+
+    def today_val(h):
+        v = sum(today_data.get(h, {}).values())
+        return v if h in today_data else None
+
+    def avg_val(h):
+        vals = [h_total(d, h) for d in past_days]
+        return sum(vals) / len(vals) if vals else 0
+
+    def avg_cls(h):
+        all_c = set()
+        for d in past_days:
+            all_c.update(hourly_raw[d].get(h, {}).keys())
+        return {c: sum(hourly_raw[d].get(h, {}).get(c, 0) for d in past_days) / len(past_days)
+                for c in all_c}
+
+    def spike_of(tv, av):
+        if tv is None or av <= 0:
+            return None, 0
+        p = (tv - av) / av * 100
+        if p >= 25:  return 'red',    round(p)
+        if p >= 15:  return 'orange', round(p)
+        return None, round(p)
+
+    h_today = {h: today_val(h) for h in HOURS}
+    h_avg   = {h: avg_val(h)   for h in HOURS}
+
+    # ── Banner ────────────────────────────────────────────────────
+    done     = [h for h in HOURS if h_today[h] is not None]
+    t_total  = sum(h_today[h] for h in done)
+    a_total  = sum(h_avg[h]   for h in done)
+    vs_pct   = (t_total - a_total) / a_total * 100 if a_total else 0
+    n_red    = sum(1 for h in done if spike_of(h_today[h], h_avg[h])[0] == 'red')
+    n_ora    = sum(1 for h in done if spike_of(h_today[h], h_avg[h])[0] == 'orange')
+    vs_col   = ('#C62828' if vs_pct > 15 else '#E65100' if vs_pct > 0 else '#2E7D32')
+    vs_arr   = '↑' if vs_pct > 0 else '↓'
+    sp_lbl   = ('🔴 ' + str(n_red) + ' hot, 🟠 ' + str(n_ora) + ' warm'
+                if n_red or n_ora else '✅ All normal')
+
+    banner = f'''<div class="curr-banner">
+  <div class="stat-card"><div class="k">Today\'s Calls (so far)</div>
+    <div class="v">{t_total:,}</div></div>
+  <div class="stat-card"><div class="k">7D Avg (same slots)</div>
+    <div class="v">{int(round(a_total)):,}</div></div>
+  <div class="stat-card"><div class="k">vs 7D Avg</div>
+    <div class="v" style="color:{vs_col}">{vs_pct:+.1f}% {vs_arr}</div></div>
+  <div class="stat-card"><div class="k">Spike Slots</div>
+    <div class="v" style="font-size:14px">{sp_lbl}</div></div>
+</div>'''
+
+    # ── Chart ─────────────────────────────────────────────────────
+    c_labels = [f'{h:02d}:00' for h in HOURS]
+    c_today  = [h_today[h] for h in HOURS]          # None where no data
+    c_avg    = [round(h_avg[h], 1) for h in HOURS]
+    c_colors = []
+    for h in HOURS:
+        st, _ = spike_of(h_today[h], h_avg[h])
+        c_colors.append('#C62828bb' if st == 'red' else
+                        '#FB8C00bb' if st == 'orange' else '#1E88E5bb')
+
+    chart = f'''<div class="chart-wrap"
+  style="position:relative;height:360px;width:100%;overflow:hidden;margin-bottom:24px;">
+  <canvas id="currentChart"></canvas>
+</div>
+<script>
+(function(){{
+  var ctx = document.getElementById('currentChart').getContext('2d');
+  new Chart(ctx, {{
+    type: 'bar',
+    data: {{
+      labels: {json.dumps(c_labels)},
+      datasets: [
+        {{
+          label: 'Today',
+          data: {json.dumps(c_today)},
+          backgroundColor: {json.dumps(c_colors)},
+          borderRadius: 4, borderSkipped: false, order: 2
+        }},
+        {{
+          label: '7-Day Avg',
+          data: {json.dumps(c_avg)},
+          type: 'line',
+          borderColor: '#E91E8C', backgroundColor: '#E91E8C15',
+          borderWidth: 2.5, pointRadius: 5, pointHoverRadius: 8,
+          tension: 0.3, fill: false, order: 1
+        }}
+      ]
+    }},
+    options: {{
+      responsive: true, maintainAspectRatio: false,
+      devicePixelRatio: window.devicePixelRatio || 2,
+      interaction: {{ mode: 'index', intersect: false }},
+      plugins: {{
+        title: {{ display: true,
+          text: 'Hourly Call Volume — Today vs 7-Day Average',
+          font: {{ size: 14, weight: 'bold' }}, padding: {{ bottom: 14 }} }},
+        legend: {{ position: 'top', labels: {{ boxWidth: 14, font: {{ size: 12 }} }} }}
+      }},
+      scales: {{
+        x: {{ ticks: {{ font: {{ size: 12 }}, color: '#333' }}, grid: {{ color: '#eee' }} }},
+        y: {{ title: {{ display: true, text: 'Calls / hour', font: {{ size: 12 }} }},
+              ticks: {{ font: {{ size: 11 }} }}, grid: {{ color: '#eee' }},
+              beginAtZero: true }}
+      }}
+    }}
+  }});
+}})();
+</script>'''
+
+    # ── Hourly table ──────────────────────────────────────────────
+    th_cells = (['<th style="text-align:left">Hour</th>',
+                 '<th style="background:#BBDEFB;color:#1565C0">7D Avg</th>',
+                 '<th style="background:#FCE4EC;color:#880E4F">Today</th>'] +
+                [f'<th>{d.strftime("%d-%b")}</th>' for d in past_days_desc])
+    thead = '<tr>' + ''.join(th_cells) + '</tr>'
+
+    tbody = []
+    for h in HOURS:
+        tv, av   = h_today[h], h_avg[h]
+        st, pct  = spike_of(tv, av)
+        hlabel   = f'{h:02d}:00'
+
+        if tv is None:
+            td_t = '<td class="curr-pending">—</td>'
+        elif st == 'red':
+            td_t = (f'<td class="curr-red"><b>{tv:,}</b>'
+                    f'<span class="curr-badge">+{pct}%&uarr;</span></td>')
+        elif st == 'orange':
+            td_t = (f'<td class="curr-orange"><b>{tv:,}</b>'
+                    f'<span class="curr-badge">+{pct}%&uarr;</span></td>')
+        else:
+            sign = f'+{pct}%' if pct > 0 else (f'{pct}%' if pct < 0 else '')
+            td_t = (f'<td class="curr-normal">{tv:,}'
+                    f'<small class="curr-small"> {sign}</small></td>')
+
+        past_tds = ''.join(f'<td class="curr-past">{h_total(d, h):,}</td>'
+                           for d in past_days_desc)
+
+        row_cls = 'curr-row-spike' if st else ''
+        tbody.append(
+            f'<tr class="{row_cls}">'
+            f'<td class="curr-hour-cell">{hlabel}</td>'
+            f'<td class="curr-avg-cell">{int(round(av)):,}</td>'
+            f'{td_t}{past_tds}</tr>'
+        )
+
+    table = (f'<table class="curr-table"><thead>{thead}</thead>'
+             f'<tbody>{"".join(tbody)}</tbody></table>')
+
+    # ── Spike remarks ─────────────────────────────────────────────
+    spike_list = [(h, st, pct, h_today[h], h_avg[h])
+                  for h in HOURS
+                  for st, pct in [spike_of(h_today[h], h_avg[h])]
+                  if st]
+
+    remarks = ''
+    if spike_list:
+        cards = []
+        for h, st, pct, tv, av in spike_list:
+            hlabel   = f'{h:02d}:00–{h+1:02d}:00'
+            bcol     = '#C62828' if st == 'red' else '#E65100'
+            emoji    = '🔴' if st == 'red' else '🟠'
+            t_cls    = today_data.get(h, {})
+            a_cls    = avg_cls(h)
+            all_c    = set(list(t_cls.keys()) + list(a_cls.keys()))
+
+            rows = []
+            for c in all_c:
+                tv2 = t_cls.get(c, 0)
+                av2 = a_cls.get(c, 0)
+                if tv2 == 0 and av2 < 0.5:
+                    continue
+                dp = (tv2 - av2) / av2 * 100 if av2 > 0 else (100 if tv2 else 0)
+                rows.append((c, tv2, av2, round(dp)))
+            rows.sort(key=lambda x: abs(x[3]), reverse=True)
+
+            trs = []
+            for c, tv2, av2, dp in rows[:6]:
+                ps = f'{dp:+d}%'
+                if dp >= 25:    pc = f'<td style="color:#C62828;font-weight:700">{ps} ↑</td>'
+                elif dp >= 15:  pc = f'<td style="color:#E65100;font-weight:600">{ps} ↑</td>'
+                elif dp <= -15: pc = f'<td style="color:#2E7D32">{ps} ↓</td>'
+                else:           pc = f'<td style="color:#888">{ps}</td>'
+                trs.append(f'<tr><td>{html.escape(c)}</td>'
+                           f'<td><b>{tv2:,}</b></td>'
+                           f'<td>{av2:.0f}</td>{pc}</tr>')
+
+            cards.append(
+                f'<div class="spike-card">'
+                f'<div class="spike-card-title">{emoji} <b>{html.escape(hlabel)}</b>'
+                f' &mdash; {tv:,} calls vs 7D avg {int(round(av)):,}'
+                f' <span style="color:{bcol};font-weight:700">(+{pct}%)</span></div>'
+                f'<table class="spike-disp-table"><thead>'
+                f'<tr><th>Disposition Class</th><th>Today</th><th>7D Avg</th>'
+                f'<th>vs Avg</th></tr></thead>'
+                f'<tbody>{"".join(trs)}</tbody></table></div>'
+            )
+
+        remarks = (
+            f'<div class="spike-remarks-wrap">'
+            f'<div class="spike-remarks-hdr">&#128269; Spike Remarks &mdash;'
+            f' What drove the spike?</div>'
+            f'<div class="spike-cards-row">{"".join(cards)}</div></div>'
+        )
+
+    return banner + chart + table + remarks
+
+
 # ---------------------------------------------------------------- tabs
 
 tabs_buttons = []
@@ -518,6 +759,11 @@ for ym in reversed(display_months):
     tid = f"tab-{ym[0]}-{ym[1]:02d}"
     tabs_buttons.append(f'<button class="tab-btn" data-target="{tid}">{fmt_month(ym)}</button>')
     tabs_panels.append(f'<section id="{tid}" class="tab-panel">{month_table(ym)}</section>')
+# Current tab
+tabs_buttons.append('<button class="tab-btn" data-target="tab-current">&#9679; Current</button>')
+tabs_panels.append(
+    f'<section id="tab-current" class="tab-panel">{build_current_tab()}</section>'
+)
 # MoM tab
 tabs_buttons.append('<button class="tab-btn" data-target="tab-mom">MoM Comparison</button>')
 mom_panel = f'''
@@ -873,6 +1119,45 @@ table.metrics-dash td.num.avgcol {{ background: #C8E6C9 !important; }}
 .view-toggle-btn:not(.active):hover {{ border-color: var(--pink); color: var(--pink); }}
 footer {{ color: var(--muted); font-size: 11px; text-align: center; padding: 24px;
   background: #fff; border-top: 1px solid var(--grey); }}
+
+/* ---- Current tab ---- */
+.curr-banner {{ display:flex; gap:14px; flex-wrap:wrap; margin-bottom:20px; }}
+.curr-table {{ border-collapse:separate; border-spacing:0; border:1px solid var(--grey);
+  background:#fff; font-size:12.5px; box-shadow:0 1px 4px rgba(0,0,0,.06);
+  width:100%; margin-bottom:24px; }}
+.curr-table th {{ background:var(--grey-soft); font-weight:700; text-align:center;
+  padding:7px 10px; border-right:1px solid var(--grey); border-bottom:2px solid var(--grey);
+  position:sticky; top:58px; z-index:20; white-space:nowrap; }}
+.curr-table td {{ padding:6px 10px; border-right:1px solid var(--grey);
+  border-bottom:1px solid var(--grey); text-align:center; }}
+.curr-hour-cell {{ font-weight:700; color:var(--pink); text-align:left !important;
+  background:#fff; position:sticky; left:0; z-index:10;
+  box-shadow:2px 0 4px rgba(0,0,0,.05); white-space:nowrap; }}
+.curr-avg-cell  {{ background:#E3F2FD !important; font-weight:700; color:#1565C0; }}
+.curr-normal    {{ background:#fff; color:#333; }}
+.curr-red       {{ background:#FFEBEE !important; color:#C62828; }}
+.curr-orange    {{ background:#FFF3E0 !important; color:#E65100; }}
+.curr-pending   {{ background:#FAFAFA; color:#bbb; font-style:italic; }}
+.curr-past      {{ background:#fff; color:#555; }}
+.curr-badge     {{ display:block; font-size:10px; font-weight:700; margin-top:1px; }}
+.curr-small     {{ color:#999; font-size:10px; }}
+.curr-row-spike td {{ outline:none; }}
+.curr-row-spike .curr-hour-cell {{ border-left:3px solid var(--red); }}
+
+/* spike remarks */
+.spike-remarks-wrap {{ margin-top:28px; }}
+.spike-remarks-hdr  {{ font-size:14px; font-weight:700; color:#333; margin-bottom:14px;
+  padding-bottom:6px; border-bottom:2px solid var(--pink-light); }}
+.spike-cards-row {{ display:flex; gap:16px; flex-wrap:wrap; }}
+.spike-card {{ background:#fff; border:1px solid var(--grey); border-radius:10px;
+  padding:14px 18px; min-width:340px; flex:1;
+  box-shadow:0 2px 8px rgba(0,0,0,.06); }}
+.spike-card-title {{ font-size:13px; margin-bottom:10px; }}
+.spike-disp-table {{ width:100%; border-collapse:collapse; font-size:12px; }}
+.spike-disp-table th {{ background:var(--grey-soft); padding:5px 8px; text-align:left;
+  border-bottom:1px solid var(--grey); font-weight:700; }}
+.spike-disp-table td {{ padding:5px 8px; border-bottom:1px solid #f0f0f0; text-align:left; }}
+.spike-disp-table tr:last-child td {{ border-bottom:none; }}
 
 /* raw-data drill-through modal */
 .modal-backdrop {{ position: fixed; inset: 0; background: rgba(0,0,0,.5);

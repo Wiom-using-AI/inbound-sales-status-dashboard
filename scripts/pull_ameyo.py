@@ -101,6 +101,22 @@ GROUP BY 1
 ORDER BY 1
 """
 
+
+# ---- Query 3: Hourly slot data for last 8 days (Current tab) ----
+SQL_HOURLY = """
+SELECT
+    CALL_TIME::DATE                                                    AS call_date,
+    HOUR(CALL_TIME)                                                    AS call_hour,
+    COALESCE(NULLIF(TRIM(DISPOSITION_CLASS), ''), '(Unclassified)')   AS disposition_class,
+    COUNT(*)                                                           AS call_count
+FROM PROD_DB.PUBLIC.AMEYO_CALL_DETAILS_REPORT
+WHERE QUEUE_NAME IN ('high_pain_queue', 'low_pain_queue')
+  AND CALL_TYPE = 'inbound.call.dial'
+  AND CALL_TIME::DATE >= DATEADD(day, -8, CURRENT_DATE())
+GROUP BY 1, 2, 3
+ORDER BY 1, 2, 3
+"""
+
 data_dir = Path(os.environ.get("DATA_DIR",
             str(Path(__file__).resolve().parent.parent / "data")))
 
@@ -109,3 +125,6 @@ run_query(SQL_COUNTS, data_dir / "ameyo_daily.csv")
 
 print("Pulling daily metrics (AHT, missed calls)...")
 run_query(SQL_METRICS, data_dir / "ameyo_metrics.csv")
+
+print("Pulling hourly slot data (Current tab)...")
+run_query(SQL_HOURLY, data_dir / "ameyo_hourly.csv")
