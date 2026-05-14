@@ -108,13 +108,14 @@ SELECT
     CALL_TIME::DATE                                                    AS call_date,
     HOUR(CALL_TIME)                                                    AS call_hour,
     COALESCE(NULLIF(TRIM(DISPOSITION_CLASS), ''), '(Unclassified)')   AS disposition_class,
+    COALESCE(NULLIF(TRIM(DISPOSITION_CODE),  ''), '(Unclassified)')   AS disposition_code,
     COUNT(*)                                                           AS call_count
 FROM PROD_DB.PUBLIC.AMEYO_CALL_DETAILS_REPORT
 WHERE QUEUE_NAME IN ('high_pain_queue', 'low_pain_queue')
   AND CALL_TYPE = 'inbound.call.dial'
   AND CALL_TIME::DATE >= DATEADD(day, -8, CURRENT_DATE())
-GROUP BY 1, 2, 3
-ORDER BY 1, 2, 3
+GROUP BY 1, 2, 3, 4
+ORDER BY 1, 2, 3, 4
 """
 
 data_dir = Path(os.environ.get("DATA_DIR",

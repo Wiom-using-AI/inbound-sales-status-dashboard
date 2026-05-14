@@ -52,18 +52,25 @@ if SRC_METRICS.exists():
             "agents": int(mr.get("AGENTS_LOGGED", 0)),
         }
 
-# Load hourly data: hourly_raw[date][hour][cls] = count
+# Load hourly data:
+#   hourly_raw[date][hour][cls]       = total count  (for chart/table)
+#   hourly_detail[date][hour][cls][code] = count per sub-code (for spike remarks)
 _IST = timezone(_td(hours=5, minutes=30))
 _NOW_IST = datetime.now(_IST)
 CURR_HOUR_IST = _NOW_IST.hour
 
-hourly_raw = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
+hourly_raw    = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
+hourly_detail = defaultdict(lambda: defaultdict(
+                    lambda: defaultdict(lambda: defaultdict(int))))
 if SRC_HOURLY.exists():
     for _hr in csv.DictReader(SRC_HOURLY.open()):
-        _d  = date.fromisoformat(_hr["CALL_DATE"])
-        _h  = int(_hr["CALL_HOUR"])
-        _cl = _hr["DISPOSITION_CLASS"]
-        hourly_raw[_d][_h][_cl] += int(_hr["CALL_COUNT"])
+        _d   = date.fromisoformat(_hr["CALL_DATE"])
+        _h   = int(_hr["CALL_HOUR"])
+        _cl  = _hr["DISPOSITION_CLASS"]
+        _co  = _hr.get("DISPOSITION_CODE", "(Unclassified)")
+        _cnt = int(_hr["CALL_COUNT"])
+        hourly_raw[_d][_h][_cl]        += _cnt
+        hourly_detail[_d][_h][_cl][_co] += _cnt
 
 CLASS_MERGE_EXACT = {
     "Sales-App Issues":                 "Sales Queue",
@@ -538,7 +545,8 @@ def build_current_tab():
         return ('<div style="padding:40px;color:#888;font-style:italic">'
                 'Hourly data not yet available — click Refresh Now.</div>')
 
-    today_data = hourly_raw.get(TODAY, {})
+    today_data   = hourly_raw.get(TODAY, {})
+    today_detail = hourly_detail.get(TODAY, {})
 
     def h_total(d, h):
         return sum(hourly_raw[d].get(h, {}).values())
@@ -692,60 +700,115 @@ def build_current_tab():
              f'<tbody>{"".join(tbody)}</tbody></table>')
 
     # ── Spike remarks ─────────────────────────────────────────────
+    # Only report hours where enough calls exist to be meaningful
+    MIN_CALLS_CLASS = 20   # class must have ≥20 calls today to appear in breakdown
+    MIN_CALLS_CODE  = 10   # sub-code must have ≥10 calls today to appear
+
     spike_list = [(h, st, pct, h_today[h], h_avg[h])
                   for h in HOURS
                   for st, pct in [spike_of(h_today[h], h_avg[h])]
                   if st]
 
+    # Helper: 7D avg per sub-code for a given hour+class
+    def avg_codes_for(h, cls):
+        all_co = set()
+        for d in past_days:
+            all_co.update(hourly_detail[d][h].get(cls, {}).keys())
+        return {co: sum(hourly_detail[d][h].get(cls, {}).get(co, 0)
+                        for d in past_days) / len(past_days)
+                for co in all_co}
+
     remarks = ''
     if spike_list:
         cards = []
         for h, st, pct, tv, av in spike_list:
-            hlabel   = f'{h:02d}:00–{h+1:02d}:00'
-            bcol     = '#C62828' if st == 'red' else '#E65100'
-            emoji    = '🔴' if st == 'red' else '🟠'
-            t_cls    = today_data.get(h, {})
-            a_cls    = avg_cls(h)
-            all_c    = set(list(t_cls.keys()) + list(a_cls.keys()))
+            hlabel = f'{h:02d}:00–{h+1:02d}:00'
+            bcol   = '#C62828' if st == 'red' else '#E65100'
+            emoji  = '🔴' if st == 'red' else '🟠'
+            t_cls  = today_data.get(h, {})
+            a_cls  = avg_cls(h)
+            all_c  = set(list(t_cls.keys()) + list(a_cls.keys()))
 
-            rows = []
+            # ── Class-level rows (meaningful volume only) ──────────
+            cls_rows = []
             for c in all_c:
                 tv2 = t_cls.get(c, 0)
                 av2 = a_cls.get(c, 0)
-                if tv2 == 0 and av2 < 0.5:
+                # Skip noise: must have at least MIN_CALLS_CLASS calls today
+                # OR at least that in the 7D avg (catching new-category surges)
+                if tv2 < MIN_CALLS_CLASS and av2 < MIN_CALLS_CLASS:
                     continue
                 dp = (tv2 - av2) / av2 * 100 if av2 > 0 else (100 if tv2 else 0)
-                rows.append((c, tv2, av2, round(dp)))
-            rows.sort(key=lambda x: abs(x[3]), reverse=True)
+                cls_rows.append((c, tv2, av2, round(dp)))
+
+            # Sort: biggest positive spike first, then by volume
+            cls_rows.sort(key=lambda x: (-x[3], -x[1]))
 
             trs = []
-            for c, tv2, av2, dp in rows[:6]:
+            for c, tv2, av2, dp in cls_rows[:8]:
                 ps = f'{dp:+d}%'
                 if dp >= 25:    pc = f'<td style="color:#C62828;font-weight:700">{ps} ↑</td>'
                 elif dp >= 15:  pc = f'<td style="color:#E65100;font-weight:600">{ps} ↑</td>'
                 elif dp <= -15: pc = f'<td style="color:#2E7D32">{ps} ↓</td>'
-                else:           pc = f'<td style="color:#888">{ps}</td>'
-                trs.append(f'<tr><td>{html.escape(c)}</td>'
-                           f'<td><b>{tv2:,}</b></td>'
-                           f'<td>{av2:.0f}</td>{pc}</tr>')
+                else:           pc = f'<td style="color:#555">{ps}</td>'
+
+                # Class row
+                trs.append(
+                    f'<tr style="background:#f9f9f9">'
+                    f'<td style="font-weight:700;color:var(--pink)">{html.escape(c)}</td>'
+                    f'<td><b>{tv2:,}</b></td><td>{av2:.0f}</td>{pc}</tr>'
+                )
+
+                # ── Sub-code rows for this class ───────────────────
+                t_codes = today_detail.get(h, {}).get(c, {})
+                a_codes = avg_codes_for(h, c)
+                all_co  = set(list(t_codes.keys()) + list(a_codes.keys()))
+                code_rows = []
+                for co in all_co:
+                    tv3 = t_codes.get(co, 0)
+                    av3 = a_codes.get(co, 0)
+                    if tv3 < MIN_CALLS_CODE and av3 < MIN_CALLS_CODE:
+                        continue
+                    dp3 = (tv3 - av3) / av3 * 100 if av3 > 0 else (100 if tv3 else 0)
+                    code_rows.append((co, tv3, av3, round(dp3)))
+                code_rows.sort(key=lambda x: (-x[3], -x[1]))
+
+                for co, tv3, av3, dp3 in code_rows[:5]:
+                    ps3 = f'{dp3:+d}%'
+                    if dp3 >= 25:    pc3 = f'<span style="color:#C62828;font-weight:700">{ps3} ↑</span>'
+                    elif dp3 >= 15:  pc3 = f'<span style="color:#E65100;font-weight:600">{ps3} ↑</span>'
+                    elif dp3 <= -15: pc3 = f'<span style="color:#2E7D32">{ps3} ↓</span>'
+                    else:            pc3 = f'<span style="color:#888">{ps3}</span>'
+                    trs.append(
+                        f'<tr>'
+                        f'<td style="padding-left:24px;color:#555">'
+                        f'&#x21B3; {html.escape(co)}</td>'
+                        f'<td>{tv3:,}</td><td>{av3:.0f}</td>'
+                        f'<td>{pc3}</td></tr>'
+                    )
+
+            if not trs:
+                # All classes below threshold — skip this hour's card
+                continue
 
             cards.append(
                 f'<div class="spike-card">'
                 f'<div class="spike-card-title">{emoji} <b>{html.escape(hlabel)}</b>'
                 f' &mdash; {tv:,} calls vs 7D avg {int(round(av)):,}'
-                f' <span style="color:{bcol};font-weight:700">(+{pct}%)</span></div>'
+                f' <span style="color:{bcol};font-weight:700">&nbsp;(+{pct}%)</span></div>'
                 f'<table class="spike-disp-table"><thead>'
-                f'<tr><th>Disposition Class</th><th>Today</th><th>7D Avg</th>'
-                f'<th>vs Avg</th></tr></thead>'
+                f'<tr><th>Disposition Class / Sub-category</th>'
+                f'<th>Today</th><th>7D Avg</th><th>vs Avg</th></tr></thead>'
                 f'<tbody>{"".join(trs)}</tbody></table></div>'
             )
 
-        remarks = (
-            f'<div class="spike-remarks-wrap">'
-            f'<div class="spike-remarks-hdr">&#128269; Spike Remarks &mdash;'
-            f' What drove the spike?</div>'
-            f'<div class="spike-cards-row">{"".join(cards)}</div></div>'
-        )
+        if cards:
+            remarks = (
+                f'<div class="spike-remarks-wrap">'
+                f'<div class="spike-remarks-hdr">&#128269; Spike Remarks &mdash;'
+                f' What drove the spike?</div>'
+                f'<div class="spike-cards-row">{"".join(cards)}</div></div>'
+            )
 
     return banner + chart + table + remarks
 
