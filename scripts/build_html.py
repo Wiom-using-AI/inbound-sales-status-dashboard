@@ -535,107 +535,190 @@ top10_table = f'<table class="dash"><thead>{top10_head}</thead><tbody>{"".join(t
 # ---------------------------------------------------------------- Current tab
 
 def build_current_tab():
-    TODAY   = date.today()
-    HOURS   = list(range(8, 23))          # 08:00 – 22:00
+    TODAY = date.today()
+    HOURS = list(range(8, 23))
 
-    past_days      = sorted(d for d in hourly_raw if d < TODAY)[-7:]
-    past_days_desc = list(reversed(past_days))   # most-recent first for table cols
-
-    if not past_days:
+    all_dates_sorted = sorted(hourly_raw.keys())
+    if not all_dates_sorted:
         return ('<div style="padding:40px;color:#888;font-style:italic">'
                 'Hourly data not yet available — click Refresh Now.</div>')
 
-    today_data   = hourly_raw.get(TODAY, {})
-    today_detail = hourly_detail.get(TODAY, {})
+    # ── Build per-date payload for JS ────────────────────────────────
+    dates_payload   = {}
+    all_date_totals = {}
+    for d in all_dates_sorted:
+        prior = sorted([x for x in all_dates_sorted if x < d])[-7:]
+        n_p   = len(prior) or 1
 
-    def h_total(d, h):
-        return sum(hourly_raw[d].get(h, {}).values())
+        t_h, a_h, ct_h, ac_h = {}, {}, {}, {}
+        for h in HOURS:
+            t_h[h] = sum(hourly_raw[d].get(h, {}).values())
+            a_h[h] = round(
+                sum(sum(hourly_raw[p].get(h, {}).values()) for p in prior) / n_p, 1
+            ) if prior else 0.0
+            ct_h[h] = dict(hourly_raw[d].get(h, {}))
+            all_c = set()
+            for p in prior:
+                all_c.update(hourly_raw[p].get(h, {}).keys())
+            ac_h[h] = {
+                c: round(sum(hourly_raw[p].get(h, {}).get(c, 0)
+                             for p in prior) / n_p, 1)
+                for c in all_c
+            }
 
-    def today_val(h):
-        v = sum(today_data.get(h, {}).values())
-        return v if h in today_data else None
+        entry = {
+            "t":  {str(h): t_h[h]  for h in HOURS},
+            "a":  {str(h): a_h[h]  for h in HOURS},
+            "p":  [str(p) for p in reversed(prior)],
+            "ct": {str(h): ct_h[h] for h in HOURS},
+            "ac": {str(h): ac_h[h] for h in HOURS},
+        }
 
-    def avg_val(h):
-        vals = [h_total(d, h) for d in past_days]
-        return sum(vals) / len(vals) if vals else 0
+        # Sub-code detail: only embed for TODAY to keep JSON size manageable
+        if d == TODAY:
+            co_h, ao_h = {}, {}
+            for h in HOURS:
+                co_h[h] = {c: dict(codes)
+                            for c, codes in hourly_detail[d].get(h, {}).items()}
+                all_c2 = set()
+                for p in prior:
+                    all_c2.update(hourly_detail[p].get(h, {}).keys())
+                ao_h[h] = {}
+                for c2 in all_c2:
+                    all_co = set()
+                    for p in prior:
+                        all_co.update(
+                            hourly_detail[p].get(h, {}).get(c2, {}).keys())
+                    ao_h[h][c2] = {
+                        co: round(sum(
+                            hourly_detail[p].get(h, {}).get(c2, {}).get(co, 0)
+                            for p in prior) / n_p, 1)
+                        for co in all_co
+                    }
+            entry["co"] = {str(h): co_h[h] for h in HOURS}
+            entry["ao"] = {str(h): ao_h[h] for h in HOURS}
 
-    def avg_cls(h):
-        all_c = set()
-        for d in past_days:
-            all_c.update(hourly_raw[d].get(h, {}).keys())
-        return {c: sum(hourly_raw[d].get(h, {}).get(c, 0) for d in past_days) / len(past_days)
-                for c in all_c}
+        dates_payload[str(d)]   = entry
+        all_date_totals[str(d)] = {str(h): t_h[h] for h in HOURS}
 
-    def spike_of(tv, av):
-        if tv is None or av <= 0:
-            return None, 0
-        p = (tv - av) / av * 100
-        if p >= 25:  return 'red',    round(p)
-        if p >= 15:  return 'orange', round(p)
-        return None, round(p)
+    today_str = str(TODAY)
 
-    h_today = {h: today_val(h) for h in HOURS}
-    h_avg   = {h: avg_val(h)   for h in HOURS}
+    # Date dropdown
+    date_opts_html = ''
+    for d in reversed(all_dates_sorted):
+        lbl = (f'Today ({d.strftime("%d %b %Y")})'
+               if d == TODAY else d.strftime('%d %b %Y (%a)'))
+        sel = ' selected' if d == TODAY else ''
+        date_opts_html += f'<option value="{d}"{sel}>{html.escape(lbl)}</option>\n    '
 
-    # ── Banner ────────────────────────────────────────────────────
-    done     = [h for h in HOURS if h_today[h] is not None]
-    t_total  = sum(h_today[h] for h in done)
-    a_total  = sum(h_avg[h]   for h in done)
-    vs_pct   = (t_total - a_total) / a_total * 100 if a_total else 0
-    n_red    = sum(1 for h in done if spike_of(h_today[h], h_avg[h])[0] == 'red')
-    n_ora    = sum(1 for h in done if spike_of(h_today[h], h_avg[h])[0] == 'orange')
-    vs_col   = ('#C62828' if vs_pct > 15 else '#E65100' if vs_pct > 0 else '#2E7D32')
-    vs_arr   = '↑' if vs_pct > 0 else '↓'
-    sp_lbl   = ('🔴 ' + str(n_red) + ' hot, 🟠 ' + str(n_ora) + ' warm'
-                if n_red or n_ora else '✅ All normal')
+    # Serialise data for JS
+    payload_js    = json.dumps(dates_payload,   separators=(',', ':'))
+    all_totals_js = json.dumps(all_date_totals, separators=(',', ':'))
+    today_js      = json.dumps(today_str)
+    hours_js      = json.dumps(HOURS)
+    hlabels_js    = json.dumps([f'{h:02d}:00' for h in HOURS])
 
-    banner = f'''<div class="curr-banner">
-  <div class="stat-card"><div class="k">Today\'s Calls (so far)</div>
-    <div class="v">{t_total:,}</div></div>
-  <div class="stat-card"><div class="k">7D Avg (same slots)</div>
-    <div class="v">{int(round(a_total)):,}</div></div>
-  <div class="stat-card"><div class="k">vs 7D Avg</div>
-    <div class="v" style="color:{vs_col}">{vs_pct:+.1f}% {vs_arr}</div></div>
-  <div class="stat-card"><div class="k">Spike Slots</div>
-    <div class="v" style="font-size:14px">{sp_lbl}</div></div>
-</div>'''
+    return f'''
+<div class="curr-date-filter">
+  <label for="currDateSel" style="font-weight:600;margin-right:8px">&#128197; View Date:</label>
+  <select id="currDateSel" onchange="renderCurrent(this.value)"
+    style="padding:6px 14px;border-radius:6px;border:1.5px solid #e91e8c;
+           font-size:14px;cursor:pointer;background:#fff;color:#222">
+    {date_opts_html}
+  </select>
+</div>
 
-    # ── Chart ─────────────────────────────────────────────────────
-    c_labels = [f'{h:02d}:00' for h in HOURS]
-    c_today  = [h_today[h] for h in HOURS]          # None where no data
-    c_avg    = [round(h_avg[h], 1) for h in HOURS]
-    c_colors = []
-    for h in HOURS:
-        st, _ = spike_of(h_today[h], h_avg[h])
-        c_colors.append('#C62828bb' if st == 'red' else
-                        '#FB8C00bb' if st == 'orange' else '#1E88E5bb')
+<div id="curr-banner" class="curr-banner"></div>
 
-    chart = f'''<div class="chart-wrap"
+<div class="chart-wrap"
   style="position:relative;height:360px;width:100%;overflow:hidden;margin-bottom:24px;">
   <canvas id="currentChart"></canvas>
 </div>
+
+<div id="curr-table-wrap"></div>
+<div id="curr-spike-wrap"></div>
+
 <script>
 (function(){{
+var HOURS    = {hours_js};
+var H_LABELS = {hlabels_js};
+var TODAY    = {today_js};
+var PAYLOAD  = {payload_js};
+var ALL_T    = {all_totals_js};
+var _chart   = null;
+var MIN_CLS  = 20, MIN_CODE = 10;
+
+function spikeOf(tv, av) {{
+  if (tv == null || av <= 0) return null;
+  var p = (tv - av) / av * 100;
+  if (p >= 25) return {{st:'red',    pct:Math.round(p)}};
+  if (p >= 15) return {{st:'orange', pct:Math.round(p)}};
+  return null;
+}}
+
+function fmtD(ds) {{
+  var parts = ds.split('-');
+  var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return parts[2] + '-' + months[parseInt(parts[1],10)-1];
+}}
+
+function esc(s) {{
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}}
+
+function renderCurrent(dateStr) {{
+  var P = PAYLOAD[dateStr];
+  if (!P) return;
+  var T = P.t, A = P.a, past = P.p || [];
+  var isToday = (dateStr === TODAY);
+  var dLabel  = isToday ? 'Today' : fmtD(dateStr);
+
+  // ── Banner ─────────────────────────────────────────────────────
+  var tTot=0, aTot=0, nRed=0, nOra=0;
+  HOURS.forEach(function(h) {{
+    tTot += T[h]||0; aTot += A[h]||0;
+    var sp = spikeOf(T[h], A[h]);
+    if (sp && sp.st==='red')    nRed++;
+    if (sp && sp.st==='orange') nOra++;
+  }});
+  var vsPct  = aTot > 0 ? (tTot - aTot) / aTot * 100 : 0;
+  var vsCol  = vsPct > 15 ? '#C62828' : vsPct > 0 ? '#E65100' : '#2E7D32';
+  var vsArr  = vsPct >= 0 ? '&uarr;' : '&darr;';
+  var spLbl  = (nRed||nOra)
+    ? '&#128308; '+nRed+' hot, &#128992; '+nOra+' warm'
+    : '<span style="color:#2E7D32">&#10003; All normal</span>';
+
+  document.getElementById('curr-banner').innerHTML =
+    '<div class="stat-card"><div class="k">Calls ('+esc(dLabel)+')</div>'+
+    '<div class="v">'+tTot.toLocaleString()+'</div></div>'+
+    '<div class="stat-card"><div class="k">7D Avg (same slots)</div>'+
+    '<div class="v">'+Math.round(aTot).toLocaleString()+'</div></div>'+
+    '<div class="stat-card"><div class="k">vs 7D Avg</div>'+
+    '<div class="v" style="color:'+vsCol+'">'+(vsPct>=0?'+':'')+
+    vsPct.toFixed(1)+'% '+vsArr+'</div></div>'+
+    '<div class="stat-card"><div class="k">Spike Slots</div>'+
+    '<div class="v" style="font-size:14px">'+spLbl+'</div></div>';
+
+  // ── Chart ───────────────────────────────────────────────────────
+  var cToday  = HOURS.map(function(h){{ return (T[h]!=null) ? T[h] : null; }});
+  var cAvg    = HOURS.map(function(h){{ return A[h]||0; }});
+  var cColors = HOURS.map(function(h){{
+    var sp = spikeOf(T[h], A[h]);
+    return sp ? (sp.st==='red' ? '#C62828bb' : '#FB8C00bb') : '#1E88E5bb';
+  }});
   var ctx = document.getElementById('currentChart').getContext('2d');
-  new Chart(ctx, {{
+  if (_chart) {{ _chart.destroy(); _chart = null; }}
+  _chart = new Chart(ctx, {{
     type: 'bar',
     data: {{
-      labels: {json.dumps(c_labels)},
+      labels: H_LABELS,
       datasets: [
-        {{
-          label: 'Today',
-          data: {json.dumps(c_today)},
-          backgroundColor: {json.dumps(c_colors)},
-          borderRadius: 4, borderSkipped: false, order: 2
-        }},
-        {{
-          label: '7-Day Avg',
-          data: {json.dumps(c_avg)},
-          type: 'line',
-          borderColor: '#E91E8C', backgroundColor: '#E91E8C15',
-          borderWidth: 2.5, pointRadius: 5, pointHoverRadius: 8,
-          tension: 0.3, fill: false, order: 1
-        }}
+        {{ label: dLabel, data: cToday, backgroundColor: cColors,
+           borderRadius: 4, borderSkipped: false, order: 2 }},
+        {{ label: '7-Day Avg', data: cAvg, type: 'line',
+           borderColor: '#E91E8C', backgroundColor: '#E91E8C15',
+           borderWidth: 2.5, pointRadius: 5, pointHoverRadius: 8,
+           tension: 0.3, fill: false, order: 1 }}
       ]
     }},
     options: {{
@@ -644,173 +727,149 @@ def build_current_tab():
       interaction: {{ mode: 'index', intersect: false }},
       plugins: {{
         title: {{ display: true,
-          text: 'Hourly Call Volume — Today vs 7-Day Average',
+          text: 'Hourly Call Volume — ' + dLabel + ' vs 7-Day Average',
           font: {{ size: 14, weight: 'bold' }}, padding: {{ bottom: 14 }} }},
         legend: {{ position: 'top', labels: {{ boxWidth: 14, font: {{ size: 12 }} }} }}
       }},
       scales: {{
         x: {{ ticks: {{ font: {{ size: 12 }}, color: '#333' }}, grid: {{ color: '#eee' }} }},
         y: {{ title: {{ display: true, text: 'Calls / hour', font: {{ size: 12 }} }},
-              ticks: {{ font: {{ size: 11 }} }}, grid: {{ color: '#eee' }},
-              beginAtZero: true }}
+              ticks: {{ font: {{ size: 11 }} }}, grid: {{ color: '#eee' }}, beginAtZero: true }}
       }}
     }}
   }});
+
+  // ── Table ───────────────────────────────────────────────────────
+  var thCells =
+    '<th style="text-align:left">Hour</th>'+
+    '<th style="background:#BBDEFB;color:#1565C0">7D Avg</th>'+
+    '<th style="background:#FCE4EC;color:#880E4F">'+esc(dLabel)+'</th>';
+  past.forEach(function(pd){{ thCells += '<th>'+fmtD(pd)+'</th>'; }});
+
+  var rows = '';
+  HOURS.forEach(function(h) {{
+    var tv=T[h], av=A[h]||0;
+    var sp = spikeOf(tv, av);
+    var hl = (h<10?'0':'')+h+':00';
+    var tdT;
+    if (tv==null) {{
+      tdT = '<td class="curr-pending">—</td>';
+    }} else if (sp && sp.st==='red') {{
+      tdT = '<td class="curr-red"><b>'+tv.toLocaleString()+'</b>'+
+            '<span class="curr-badge">+'+sp.pct+'%&uarr;</span></td>';
+    }} else if (sp && sp.st==='orange') {{
+      tdT = '<td class="curr-orange"><b>'+tv.toLocaleString()+'</b>'+
+            '<span class="curr-badge">+'+sp.pct+'%&uarr;</span></td>';
+    }} else {{
+      var p2 = av>0 ? Math.round((tv-av)/av*100) : 0;
+      var sg = p2>0 ? '+'+p2+'%' : (p2<0 ? p2+'%' : '');
+      tdT = '<td class="curr-normal">'+tv.toLocaleString()+
+            '<small class="curr-small"> '+sg+'</small></td>';
+    }}
+    var pastTDs = '';
+    past.forEach(function(pd){{
+      var pv = (ALL_T[pd]||{{}})[String(h)]||0;
+      pastTDs += '<td class="curr-past">'+pv.toLocaleString()+'</td>';
+    }});
+    rows += '<tr class="'+(sp?'curr-row-spike':'')+'">'+
+            '<td class="curr-hour-cell">'+hl+'</td>'+
+            '<td class="curr-avg-cell">'+Math.round(av).toLocaleString()+'</td>'+
+            tdT+pastTDs+'</tr>';
+  }});
+
+  document.getElementById('curr-table-wrap').innerHTML =
+    '<table class="curr-table"><thead><tr>'+thCells+'</tr></thead>'+
+    '<tbody>'+rows+'</tbody></table>';
+
+  // ── Spike Remarks ───────────────────────────────────────────────
+  var spHours = HOURS.filter(function(h){{ return spikeOf(T[h], A[h]) !== null; }});
+  if (!spHours.length) {{
+    document.getElementById('curr-spike-wrap').innerHTML = ''; return;
+  }}
+
+  var cards = '';
+  spHours.forEach(function(h) {{
+    var tv=T[h]||0, av=A[h]||0;
+    var sp=spikeOf(tv,av);
+    var hlbl=(h<10?'0':'')+h+':00–'+(h+1<10?'0':'')+(h+1)+':00';
+    var bcol=sp.st==='red'?'#C62828':'#E65100';
+    var em  =sp.st==='red'?'&#128308;':'&#128992;';
+    var ctH =P.ct?P.ct[String(h)]||{{}}:{{}};
+    var acH =P.ac?P.ac[String(h)]||{{}}:{{}};
+    var coH =P.co?P.co[String(h)]||{{}}:{{}};
+    var aoH =P.ao?P.ao[String(h)]||{{}}:{{}};
+
+    var allC=new Set([].concat(Object.keys(ctH),Object.keys(acH)));
+    var clsRows=[];
+    allC.forEach(function(c){{
+      var tv2=ctH[c]||0, av2=acH[c]||0;
+      if (tv2<MIN_CLS && av2<MIN_CLS) return;
+      var dp=av2>0?(tv2-av2)/av2*100:(tv2>0?100:0);
+      clsRows.push([c,tv2,av2,Math.round(dp)]);
+    }});
+    clsRows.sort(function(a,b){{ return b[3]-a[3]||b[1]-a[1]; }});
+    clsRows=clsRows.slice(0,8);
+    if (!clsRows.length) return;
+
+    var trs='';
+    clsRows.forEach(function(row){{
+      var c=row[0],tv2=row[1],av2=row[2],dp=row[3];
+      var ps=(dp>=0?'+':'')+dp+'%', pc;
+      if (dp>=25)       pc='<td style="color:#C62828;font-weight:700">'+ps+' &#8679;</td>';
+      else if (dp>=15)  pc='<td style="color:#E65100;font-weight:600">'+ps+' &#8679;</td>';
+      else if (dp<=-15) pc='<td style="color:#2E7D32">'+ps+' &#8681;</td>';
+      else              pc='<td style="color:#555">'+ps+'</td>';
+      trs+='<tr style="background:#f9f9f9">'+
+           '<td style="font-weight:700;color:var(--pink)">'+esc(c)+'</td>'+
+           '<td><b>'+tv2.toLocaleString()+'</b></td>'+
+           '<td>'+Math.round(av2)+'</td>'+pc+'</tr>';
+
+      // Sub-code rows (populated for today; empty for past dates — coH/aoH = {{}})
+      var ctC=coH[c]||{{}}, avC=aoH[c]||{{}};
+      var allCo=new Set([].concat(Object.keys(ctC),Object.keys(avC)));
+      var coRows=[];
+      allCo.forEach(function(co){{
+        var tv3=ctC[co]||0, av3=avC[co]||0;
+        if (tv3<MIN_CODE && av3<MIN_CODE) return;
+        var dp3=av3>0?(tv3-av3)/av3*100:(tv3>0?100:0);
+        coRows.push([co,tv3,av3,Math.round(dp3)]);
+      }});
+      coRows.sort(function(a,b){{ return b[3]-a[3]||b[1]-a[1]; }});
+      coRows.slice(0,5).forEach(function(cr){{
+        var co=cr[0],tv3=cr[1],av3=cr[2],dp3=cr[3];
+        var ps3=(dp3>=0?'+':'')+dp3+'%', pc3;
+        if (dp3>=25)       pc3='<span style="color:#C62828;font-weight:700">'+ps3+' &#8679;</span>';
+        else if (dp3>=15)  pc3='<span style="color:#E65100;font-weight:600">'+ps3+' &#8679;</span>';
+        else if (dp3<=-15) pc3='<span style="color:#2E7D32">'+ps3+' &#8681;</span>';
+        else               pc3='<span style="color:#888">'+ps3+'</span>';
+        trs+='<tr>'+
+             '<td style="padding-left:24px;color:#555">&#x21B3; '+esc(co)+'</td>'+
+             '<td>'+tv3.toLocaleString()+'</td>'+
+             '<td>'+Math.round(av3)+'</td>'+
+             '<td>'+pc3+'</td></tr>';
+      }});
+    }});
+
+    if (!trs) return;
+    cards+='<div class="spike-card">'+
+           '<div class="spike-card-title">'+em+' <b>'+esc(hlbl)+'</b>'+
+           ' &mdash; '+tv.toLocaleString()+' calls vs 7D avg '+Math.round(av).toLocaleString()+
+           ' <span style="color:'+bcol+';font-weight:700"> (+'+sp.pct+'%)</span></div>'+
+           '<table class="spike-disp-table"><thead>'+
+           '<tr><th>Disposition Class / Sub-category</th>'+
+           '<th>'+esc(dLabel)+'</th><th>7D Avg</th><th>vs Avg</th></tr></thead>'+
+           '<tbody>'+trs+'</tbody></table></div>';
+  }});
+
+  document.getElementById('curr-spike-wrap').innerHTML = cards ?
+    '<div class="spike-remarks-wrap">'+
+    '<div class="spike-remarks-hdr">&#128269; Spike Remarks &mdash; What drove the spike?</div>'+
+    '<div class="spike-cards-row">'+cards+'</div></div>' : '';
+}}
+
+renderCurrent({today_js});
 }})();
 </script>'''
-
-    # ── Hourly table ──────────────────────────────────────────────
-    th_cells = (['<th style="text-align:left">Hour</th>',
-                 '<th style="background:#BBDEFB;color:#1565C0">7D Avg</th>',
-                 '<th style="background:#FCE4EC;color:#880E4F">Today</th>'] +
-                [f'<th>{d.strftime("%d-%b")}</th>' for d in past_days_desc])
-    thead = '<tr>' + ''.join(th_cells) + '</tr>'
-
-    tbody = []
-    for h in HOURS:
-        tv, av   = h_today[h], h_avg[h]
-        st, pct  = spike_of(tv, av)
-        hlabel   = f'{h:02d}:00'
-
-        if tv is None:
-            td_t = '<td class="curr-pending">—</td>'
-        elif st == 'red':
-            td_t = (f'<td class="curr-red"><b>{tv:,}</b>'
-                    f'<span class="curr-badge">+{pct}%&uarr;</span></td>')
-        elif st == 'orange':
-            td_t = (f'<td class="curr-orange"><b>{tv:,}</b>'
-                    f'<span class="curr-badge">+{pct}%&uarr;</span></td>')
-        else:
-            sign = f'+{pct}%' if pct > 0 else (f'{pct}%' if pct < 0 else '')
-            td_t = (f'<td class="curr-normal">{tv:,}'
-                    f'<small class="curr-small"> {sign}</small></td>')
-
-        past_tds = ''.join(f'<td class="curr-past">{h_total(d, h):,}</td>'
-                           for d in past_days_desc)
-
-        row_cls = 'curr-row-spike' if st else ''
-        tbody.append(
-            f'<tr class="{row_cls}">'
-            f'<td class="curr-hour-cell">{hlabel}</td>'
-            f'<td class="curr-avg-cell">{int(round(av)):,}</td>'
-            f'{td_t}{past_tds}</tr>'
-        )
-
-    table = (f'<table class="curr-table"><thead>{thead}</thead>'
-             f'<tbody>{"".join(tbody)}</tbody></table>')
-
-    # ── Spike remarks ─────────────────────────────────────────────
-    # Only report hours where enough calls exist to be meaningful
-    MIN_CALLS_CLASS = 20   # class must have ≥20 calls today to appear in breakdown
-    MIN_CALLS_CODE  = 10   # sub-code must have ≥10 calls today to appear
-
-    spike_list = [(h, st, pct, h_today[h], h_avg[h])
-                  for h in HOURS
-                  for st, pct in [spike_of(h_today[h], h_avg[h])]
-                  if st]
-
-    # Helper: 7D avg per sub-code for a given hour+class
-    def avg_codes_for(h, cls):
-        all_co = set()
-        for d in past_days:
-            all_co.update(hourly_detail[d][h].get(cls, {}).keys())
-        return {co: sum(hourly_detail[d][h].get(cls, {}).get(co, 0)
-                        for d in past_days) / len(past_days)
-                for co in all_co}
-
-    remarks = ''
-    if spike_list:
-        cards = []
-        for h, st, pct, tv, av in spike_list:
-            hlabel = f'{h:02d}:00–{h+1:02d}:00'
-            bcol   = '#C62828' if st == 'red' else '#E65100'
-            emoji  = '🔴' if st == 'red' else '🟠'
-            t_cls  = today_data.get(h, {})
-            a_cls  = avg_cls(h)
-            all_c  = set(list(t_cls.keys()) + list(a_cls.keys()))
-
-            # ── Class-level rows (meaningful volume only) ──────────
-            cls_rows = []
-            for c in all_c:
-                tv2 = t_cls.get(c, 0)
-                av2 = a_cls.get(c, 0)
-                # Skip noise: must have at least MIN_CALLS_CLASS calls today
-                # OR at least that in the 7D avg (catching new-category surges)
-                if tv2 < MIN_CALLS_CLASS and av2 < MIN_CALLS_CLASS:
-                    continue
-                dp = (tv2 - av2) / av2 * 100 if av2 > 0 else (100 if tv2 else 0)
-                cls_rows.append((c, tv2, av2, round(dp)))
-
-            # Sort: biggest positive spike first, then by volume
-            cls_rows.sort(key=lambda x: (-x[3], -x[1]))
-
-            trs = []
-            for c, tv2, av2, dp in cls_rows[:8]:
-                ps = f'{dp:+d}%'
-                if dp >= 25:    pc = f'<td style="color:#C62828;font-weight:700">{ps} ↑</td>'
-                elif dp >= 15:  pc = f'<td style="color:#E65100;font-weight:600">{ps} ↑</td>'
-                elif dp <= -15: pc = f'<td style="color:#2E7D32">{ps} ↓</td>'
-                else:           pc = f'<td style="color:#555">{ps}</td>'
-
-                # Class row
-                trs.append(
-                    f'<tr style="background:#f9f9f9">'
-                    f'<td style="font-weight:700;color:var(--pink)">{html.escape(c)}</td>'
-                    f'<td><b>{tv2:,}</b></td><td>{av2:.0f}</td>{pc}</tr>'
-                )
-
-                # ── Sub-code rows for this class ───────────────────
-                t_codes = today_detail.get(h, {}).get(c, {})
-                a_codes = avg_codes_for(h, c)
-                all_co  = set(list(t_codes.keys()) + list(a_codes.keys()))
-                code_rows = []
-                for co in all_co:
-                    tv3 = t_codes.get(co, 0)
-                    av3 = a_codes.get(co, 0)
-                    if tv3 < MIN_CALLS_CODE and av3 < MIN_CALLS_CODE:
-                        continue
-                    dp3 = (tv3 - av3) / av3 * 100 if av3 > 0 else (100 if tv3 else 0)
-                    code_rows.append((co, tv3, av3, round(dp3)))
-                code_rows.sort(key=lambda x: (-x[3], -x[1]))
-
-                for co, tv3, av3, dp3 in code_rows[:5]:
-                    ps3 = f'{dp3:+d}%'
-                    if dp3 >= 25:    pc3 = f'<span style="color:#C62828;font-weight:700">{ps3} ↑</span>'
-                    elif dp3 >= 15:  pc3 = f'<span style="color:#E65100;font-weight:600">{ps3} ↑</span>'
-                    elif dp3 <= -15: pc3 = f'<span style="color:#2E7D32">{ps3} ↓</span>'
-                    else:            pc3 = f'<span style="color:#888">{ps3}</span>'
-                    trs.append(
-                        f'<tr>'
-                        f'<td style="padding-left:24px;color:#555">'
-                        f'&#x21B3; {html.escape(co)}</td>'
-                        f'<td>{tv3:,}</td><td>{av3:.0f}</td>'
-                        f'<td>{pc3}</td></tr>'
-                    )
-
-            if not trs:
-                # All classes below threshold — skip this hour's card
-                continue
-
-            cards.append(
-                f'<div class="spike-card">'
-                f'<div class="spike-card-title">{emoji} <b>{html.escape(hlabel)}</b>'
-                f' &mdash; {tv:,} calls vs 7D avg {int(round(av)):,}'
-                f' <span style="color:{bcol};font-weight:700">&nbsp;(+{pct}%)</span></div>'
-                f'<table class="spike-disp-table"><thead>'
-                f'<tr><th>Disposition Class / Sub-category</th>'
-                f'<th>Today</th><th>7D Avg</th><th>vs Avg</th></tr></thead>'
-                f'<tbody>{"".join(trs)}</tbody></table></div>'
-            )
-
-        if cards:
-            remarks = (
-                f'<div class="spike-remarks-wrap">'
-                f'<div class="spike-remarks-hdr">&#128269; Spike Remarks &mdash;'
-                f' What drove the spike?</div>'
-                f'<div class="spike-cards-row">{"".join(cards)}</div></div>'
-            )
-
-    return banner + chart + table + remarks
 
 
 # ---------------------------------------------------------------- tabs
@@ -1197,6 +1256,10 @@ footer {{ color: var(--muted); font-size: 11px; text-align: center; padding: 24p
   background: #fff; border-top: 1px solid var(--grey); }}
 
 /* ---- Current tab ---- */
+.curr-date-filter {{ display:flex; align-items:center; margin-bottom:18px;
+  padding:10px 14px; background:#fff7fb; border:1px solid #f8bbd0;
+  border-radius:8px; gap:8px; }}
+.curr-date-filter select:focus {{ outline:none; box-shadow:0 0 0 2px #e91e8c44; }}
 .curr-banner {{ display:flex; gap:14px; flex-wrap:wrap; margin-bottom:20px; }}
 .curr-table {{ border-collapse:separate; border-spacing:0; border:1px solid var(--grey);
   background:#fff; font-size:12.5px; box-shadow:0 1px 4px rgba(0,0,0,.06);
