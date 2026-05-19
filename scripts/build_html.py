@@ -552,7 +552,12 @@ def build_current_tab():
 
         t_h, a_h, ct_h, ac_h = {}, {}, {}, {}
         for h in HOURS:
-            t_h[h] = sum(hourly_raw[d].get(h, {}).values())
+            # For TODAY: hours not yet in the data → None (renders as "—" in table)
+            if d == TODAY:
+                t_h[h] = (sum(hourly_raw[d].get(h, {}).values())
+                          if h in hourly_raw.get(d, {}) else None)
+            else:
+                t_h[h] = sum(hourly_raw[d].get(h, {}).values())
             a_h[h] = round(
                 sum(sum(hourly_raw[p].get(h, {}).values()) for p in prior) / n_p, 1
             ) if prior else 0.0
@@ -666,7 +671,7 @@ function esc(s) {{
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }}
 
-function renderCurrent(dateStr) {{
+window.renderCurrent = function(dateStr) {{
   var P = PAYLOAD[dateStr];
   if (!P) return;
   var T = P.t, A = P.a, past = P.p || [];
@@ -674,10 +679,15 @@ function renderCurrent(dateStr) {{
   var dLabel  = isToday ? 'Today' : fmtD(dateStr);
 
   // ── Banner ─────────────────────────────────────────────────────
+  // Only count hours with actual data (T[h] != null) for today's pending slots
   var tTot=0, aTot=0, nRed=0, nOra=0;
   HOURS.forEach(function(h) {{
-    tTot += T[h]||0; aTot += A[h]||0;
-    var sp = spikeOf(T[h], A[h]);
+    var tv = T[h];
+    if (tv !== null && tv !== undefined) {{
+      tTot += tv;
+      aTot += A[h]||0;   // avg counted only for completed hours
+    }}
+    var sp = spikeOf(tv, A[h]);
     if (sp && sp.st==='red')    nRed++;
     if (sp && sp.st==='orange') nOra++;
   }});
