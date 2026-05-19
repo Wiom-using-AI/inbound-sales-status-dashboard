@@ -1012,47 +1012,75 @@ per_tab_aht["tab-current"] = ""   # AHT hidden for Current tab
 # ---------------------------------------------------------------- highlights
 # Per-tab highlights: for each display month, find top spikes on the latest day.
 
-def compute_highlights(ym):
-    """Return list of spike dicts: MTD avg vs previous month avg."""
+def compute_highlights(ym, cur_days_set=None):
+    """Return list of spike dicts: cur_days_set avg vs previous month avg.
+
+    cur_days_set – explicit set of dates to use as the 'current' window.
+                   If None, uses all days in ym (full-month behaviour).
+    """
     hl = []
     if ym not in by_month:
         return hl
     prev_ym = (ym[0], ym[1] - 1) if ym[1] > 1 else (ym[0] - 1, 12)
     prev_days_set = by_month.get(prev_ym, set())
+    if cur_days_set is None:
+        cur_days_set = by_month[ym]
+
     for cls, codes in taxonomy:
-        # Current month daily values for this class
         class_cur_vals = {}
         class_prev_vals = {}
         for (k_cls, _k_code), dd in counts.items():
             if k_cls != cls:
                 continue
             for d, n in dd.items():
-                if (d.year, d.month) == ym:
+                if d in cur_days_set:
                     class_cur_vals[d] = class_cur_vals.get(d, 0) + n
                 if (d.year, d.month) == prev_ym:
                     class_prev_vals[d] = class_prev_vals.get(d, 0) + n
-        cls_mtd = avg(class_cur_vals.values()) if class_cur_vals else 0
+        cls_cur  = avg(class_cur_vals.values())  if class_cur_vals  else 0
         cls_prev = avg(class_prev_vals.values()) if class_prev_vals else 0
-        spiked, pct = spike(cls_mtd, cls_prev)
+        spiked, pct = spike(cls_cur, cls_prev)
         if spiked:
-            hl.append({"name": cls, "val": int(round(cls_mtd)), "pct": pct, "is_class": True})
+            hl.append({"name": cls, "val": int(round(cls_cur)), "pct": pct, "is_class": True})
         for code in codes:
-            code_cur = {d: counts[(cls, code)].get(d, 0) for d in by_month[ym]}
+            code_cur  = {d: counts[(cls, code)].get(d, 0) for d in cur_days_set}
             code_prev = {d: counts[(cls, code)].get(d, 0) for d in prev_days_set}
-            mtd_avg = avg(code_cur.values()) if code_cur else 0
+            cur_avg  = avg(code_cur.values())  if code_cur  else 0
             prev_avg = avg(code_prev.values()) if code_prev else 0
-            s2, p2 = spike(mtd_avg, prev_avg)
+            s2, p2 = spike(cur_avg, prev_avg)
             if s2:
-                hl.append({"name": code, "val": int(round(mtd_avg)), "pct": p2, "is_class": False})
+                hl.append({"name": code, "val": int(round(cur_avg)), "pct": p2, "is_class": False})
     hl.sort(key=lambda x: x["pct"], reverse=True)
     return hl[:8]
 
-def build_hl_html(ym, tab_id):
-    """Build a highlights div for a given month, with data-tab attribute."""
-    hl = compute_highlights(ym)
+def build_hl_html(ym, tab_id, is_current_month=False):
+    """Build a highlights div for a given month, with data-tab attribute.
+
+    is_current_month – if True, use only the last 2 days of ym instead of
+                       the full MTD, so spikes reflect very recent activity.
+    """
+    prev_ym = (ym[0], ym[1] - 1) if ym[1] > 1 else (ym[0] - 1, 12)
+
+    if is_current_month and ym in by_month:
+        last2 = set(sorted(by_month[ym])[-2:])
+        hl = compute_highlights(ym, cur_days_set=last2)
+        # Build a human-readable label like "17–18 May"
+        sorted_last2 = sorted(last2)
+        if len(sorted_last2) == 2:
+            d1 = str(sorted_last2[0].day)
+            d2 = sorted_last2[1].strftime('%d %b %Y').lstrip('0')
+            period_lbl = f'{d1}–{d2}'
+        elif sorted_last2:
+            period_lbl = sorted_last2[0].strftime('%d %b %Y')
+        else:
+            period_lbl = fmt_month(ym)
+        title = f'Top spikes — {period_lbl} vs {fmt_month(prev_ym)} avg'
+    else:
+        hl = compute_highlights(ym)
+        title = f'Top spikes — {fmt_month(ym)} avg vs {fmt_month(prev_ym)} avg'
+
     if not hl:
         return ""
-    prev_ym = (ym[0], ym[1] - 1) if ym[1] > 1 else (ym[0] - 1, 12)
     chips = []
     for h in hl:
         weight = "700" if h["is_class"] else "400"
@@ -1065,15 +1093,16 @@ def build_hl_html(ym, tab_id):
         )
     return (
         f'<div class="highlights hl-tab" data-tab="{tab_id}">'
-        f'<div class="hl-title">Top spikes — {fmt_month(ym)} avg vs {fmt_month(prev_ym)} avg</div>'
+        f'<div class="hl-title">{title}</div>'
         f'<div class="hl-chips">{"".join(chips)}</div>'
         f'</div>'
     )
 
+latest_ym = max(display_months) if display_months else None
 highlights_sections = []
 for ym in display_months:
     tab_id = f"tab-{ym[0]}-{ym[1]:02d}"
-    h = build_hl_html(ym, tab_id)
+    h = build_hl_html(ym, tab_id, is_current_month=(ym == latest_ym))
     if h:
         highlights_sections.append(h)
 highlights_html = "\n".join(highlights_sections)
