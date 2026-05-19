@@ -1062,7 +1062,13 @@ def build_hl_html(ym, tab_id, is_current_month=False):
     prev_ym = (ym[0], ym[1] - 1) if ym[1] > 1 else (ym[0] - 1, 12)
 
     if is_current_month and ym in by_month:
-        last2 = set(sorted(by_month[ym])[-2:])
+        # Use D-1 and D-2 (yesterday + day before), never today
+        _today = date.today()
+        _d1 = _today - _td(days=1)
+        _d2 = _today - _td(days=2)
+        last2 = {d for d in [_d1, _d2] if d in by_month[ym]}
+        if not last2:                       # fallback if those days have no data
+            last2 = set(sorted(by_month[ym])[-2:])
         hl = compute_highlights(ym, cur_days_set=last2)
         # Build a human-readable label like "17–18 May"
         sorted_last2 = sorted(last2)
