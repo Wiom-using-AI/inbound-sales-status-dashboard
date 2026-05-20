@@ -886,16 +886,16 @@ renderCurrent({today_js});
 
 tabs_buttons = []
 tabs_panels = []
-# month tabs (latest first, only display months)
-for ym in reversed(display_months):
-    tid = f"tab-{ym[0]}-{ym[1]:02d}"
-    tabs_buttons.append(f'<button class="tab-btn" data-target="{tid}">{fmt_month(ym)}</button>')
-    tabs_panels.append(f'<section id="{tid}" class="tab-panel">{month_table(ym)}</section>')
-# Current tab
+# Current tab — first
 tabs_buttons.append('<button class="tab-btn" data-target="tab-current">&#9679; Current</button>')
 tabs_panels.append(
     f'<section id="tab-current" class="tab-panel">{build_current_tab()}</section>'
 )
+# Month tabs (latest first)
+for ym in reversed(display_months):
+    tid = f"tab-{ym[0]}-{ym[1]:02d}"
+    tabs_buttons.append(f'<button class="tab-btn" data-target="{tid}">{fmt_month(ym)}</button>')
+    tabs_panels.append(f'<section id="{tid}" class="tab-panel">{month_table(ym)}</section>')
 # MoM tab
 tabs_buttons.append('<button class="tab-btn" data-target="tab-mom">MoM Comparison</button>')
 mom_panel = f'''
