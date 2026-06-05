@@ -155,23 +155,34 @@ class Handler(SimpleHTTPRequestHandler):
         return super().do_GET()
 
     def handle_refresh(self):
-        """Trigger a manual data refresh (pull + rebuild)."""
+        """Trigger a manual data refresh (pull + rebuild). Returns pull result."""
         import subprocess, threading
         base = Path(os.environ.get("DASHBOARD_ROOT",
                     str(Path(__file__).resolve().parent.parent / "output" / "web")))
         project_root = base.parent.parent  # output/web -> output -> project
         scripts_dir = project_root / "scripts"
 
+        # Run synchronously so we can report success/failure back to the browser
         def do_refresh():
+            errors = []
             for script in ["pull_ameyo.py", "build_html.py"]:
-                subprocess.run(
+                r = subprocess.run(
                     [sys.executable, str(scripts_dir / script)],
                     cwd=str(project_root),
+                    capture_output=True, text=True,
                 )
-            print("[manual refresh] Complete.", flush=True)
+                print(f"[manual refresh] {script} → exit {r.returncode}", flush=True)
+                if r.stdout: print(r.stdout, flush=True)
+                if r.stderr: print(r.stderr, flush=True)
+                if r.returncode != 0:
+                    errors.append(f"{script} failed (exit {r.returncode}): "
+                                  f"{(r.stderr or r.stdout or '')[:300]}")
+                    break   # don't build HTML if pull failed
+            status = ("ERROR: " + " | ".join(errors)) if errors else "OK"
+            print(f"[manual refresh] Complete — {status}", flush=True)
 
         threading.Thread(target=do_refresh, daemon=True).start()
-        return self.send_json(200, {"status": "Refresh started. Page will update in ~30 seconds."})
+        return self.send_json(200, {"status": "Refresh started. Page will reload in ~60 seconds."})
 
     def send_json(self, code, obj):
         body = json.dumps(obj).encode()

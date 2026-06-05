@@ -1448,8 +1448,16 @@ function manualRefresh(btn) {{
   btn.style.background = '#fff3e0';
   btn.style.color = '#e65100';
   fetch('/refresh').then(r => r.json()).then(d => {{
-    btn.textContent = 'Reloading...';
-    setTimeout(() => location.reload(), 35000);
+    if (d.status && d.status.startsWith('ERROR')) {{
+      btn.textContent = 'Pull failed — check server logs';
+      btn.style.color = '#b71c1c';
+      btn.style.background = '#ffebee';
+      btn.disabled = false;
+      console.error('Refresh error:', d.status);
+    }} else {{
+      btn.textContent = 'Reloading in 60s...';
+      setTimeout(() => location.reload(), 60000);
+    }}
   }}).catch(e => {{
     btn.textContent = 'Error — retry';
     btn.disabled = false;
