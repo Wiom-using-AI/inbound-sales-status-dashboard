@@ -59,8 +59,8 @@ SQL_COUNTS = """
 WITH base AS (
   SELECT
     CALL_TIME::DATE AS call_date,
-    COALESCE(NULLIF(TRIM(DISPOSITION_CLASS), ''), '(Unclassified)') AS disposition_class,
-    COALESCE(NULLIF(TRIM(DISPOSITION_CODE),  ''), '(Unclassified)') AS disposition_code
+    COALESCE(NULLIF(TRIM(DISPOSITION_CLASS), ''), 'Missed') AS disposition_class,
+    COALESCE(NULLIF(TRIM(DISPOSITION_CODE),  ''), 'Missed') AS disposition_code
   FROM PROD_DB.PUBLIC.AMEYO_CALL_DETAILS_REPORT
   WHERE QUEUE_NAME IN ('high_pain_queue', 'low_pain_queue')
     AND CALL_TYPE = 'inbound.call.dial'
@@ -79,7 +79,7 @@ SQL_METRICS = """
 WITH base AS (
   SELECT
     CALL_TIME::DATE AS call_date,
-    COALESCE(NULLIF(TRIM(DISPOSITION_CLASS), ''), '(Unclassified)') AS disposition_class,
+    COALESCE(NULLIF(TRIM(DISPOSITION_CLASS), ''), 'Missed') AS disposition_class,
     DATEDIFF('second', '00:00:00'::TIME, TRY_TO_TIME(USER_TALK_TIME))  AS talk_sec,
     DATEDIFF('second', '00:00:00'::TIME, TRY_TO_TIME(ACW_DURATION))    AS acw_sec,
     USER_ID
@@ -90,7 +90,7 @@ WITH base AS (
 SELECT
   call_date,
   COUNT(*)                                             AS total_calls,
-  SUM(CASE WHEN disposition_class = '(Unclassified)' THEN 1 ELSE 0 END)  AS missed_calls,
+  SUM(CASE WHEN disposition_class = 'Missed' THEN 1 ELSE 0 END)  AS missed_calls,
   AVG(CASE WHEN talk_sec > 0
       THEN talk_sec + COALESCE(acw_sec, 0)
       END)                                             AS avg_aht_sec,
@@ -107,8 +107,8 @@ SQL_HOURLY = """
 SELECT
     CALL_TIME::DATE                                                    AS call_date,
     HOUR(CALL_TIME)                                                    AS call_hour,
-    COALESCE(NULLIF(TRIM(DISPOSITION_CLASS), ''), '(Unclassified)')   AS disposition_class,
-    COALESCE(NULLIF(TRIM(DISPOSITION_CODE),  ''), '(Unclassified)')   AS disposition_code,
+    COALESCE(NULLIF(TRIM(DISPOSITION_CLASS), ''), 'Missed')   AS disposition_class,
+    COALESCE(NULLIF(TRIM(DISPOSITION_CODE),  ''), 'Missed')   AS disposition_code,
     COUNT(*)                                                           AS call_count
 FROM PROD_DB.PUBLIC.AMEYO_CALL_DETAILS_REPORT
 WHERE QUEUE_NAME IN ('high_pain_queue', 'low_pain_queue')

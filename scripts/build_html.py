@@ -38,7 +38,14 @@ OUT = OUT_DIR / "index.html"
 
 # ---------------------------------------------------------------- load
 
+# Normalise the legacy label so old CSVs and new CSVs both display correctly
+def _norm(v: str) -> str:
+    return "Missed" if v == "(Unclassified)" else v
+
 rows = list(csv.DictReader(SRC.open()))
+for _r in rows:
+    _r["DISPOSITION_CLASS"] = _norm(_r["DISPOSITION_CLASS"])
+    _r["DISPOSITION_CODE"]  = _norm(_r["DISPOSITION_CODE"])
 
 # Load daily metrics (AHT, missed calls)
 metrics_by_date = {}  # date -> {total, missed, aht_sec}
@@ -66,8 +73,8 @@ if SRC_HOURLY.exists():
     for _hr in csv.DictReader(SRC_HOURLY.open()):
         _d   = date.fromisoformat(_hr["CALL_DATE"])
         _h   = int(_hr["CALL_HOUR"])
-        _cl  = _hr["DISPOSITION_CLASS"]
-        _co  = _hr.get("DISPOSITION_CODE", "(Unclassified)")
+        _cl  = _norm(_hr["DISPOSITION_CLASS"])
+        _co  = _norm(_hr.get("DISPOSITION_CODE", "Missed"))
         _cnt = int(_hr["CALL_COUNT"])
         hourly_raw[_d][_h][_cl]        += _cnt
         hourly_detail[_d][_h][_cl][_co] += _cnt
@@ -87,7 +94,7 @@ def display_class(src_cls: str) -> str:
         return "Sales Queue"
     return src_cls
 
-COLLAPSED_CLASSES  = {"Sales Queue", "Booking Queue", "(Unclassified)",
+COLLAPSED_CLASSES  = {"Sales Queue", "Booking Queue", "Missed",
                       "PayG - Clarification Provided",
                       "user.forced.logged.off",
                       "user.transferred.to.campaign"}
@@ -126,7 +133,7 @@ MIDDLE_ORDER  = [
     "user.forced.logged.off",
     "user.transferred.to.campaign",
 ]
-PINNED_BOTTOM = ["Sales Queue", "Booking Queue", "(Unclassified)"]
+PINNED_BOTTOM = ["Sales Queue", "Booking Queue", "Missed"]
 
 cls_codes = defaultdict(set)
 for cls, code in counts.keys():

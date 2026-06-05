@@ -94,14 +94,14 @@ def build_where(cls: str, code: str, scope: str, day: str, ym: str) -> str:
     if cls == "Sales Queue":
         q = ",".join("'" + sql_quote(c) + "'" for c in SALES_SOURCE_CLASSES)
         wh.append(f"DISPOSITION_CLASS IN ({q})")
-    elif cls == "(Unclassified)":
+    elif cls in ("Missed", "(Unclassified)"):
         wh.append("(DISPOSITION_CLASS IS NULL OR TRIM(DISPOSITION_CLASS) = '')")
     elif cls == "Booking Queue":
         wh.append(f"DISPOSITION_CLASS = 'Booking Queue'")
     elif cls:
         wh.append(f"DISPOSITION_CLASS = '{sql_quote(cls)}'")
 
-    if code and cls not in ("Sales Queue", "Booking Queue", "(Unclassified)"):
+    if code and cls not in ("Sales Queue", "Booking Queue", "Missed", "(Unclassified)"):
         wh.append(f"DISPOSITION_CODE = '{sql_quote(code)}'")
 
     return " AND ".join(wh)
