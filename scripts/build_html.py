@@ -794,9 +794,37 @@ window.renderCurrent = function(dateStr) {{
             tdT+pastTDs+'</tr>';
   }});
 
+  // ── Total row ───────────────────────────────────────────────────
+  var totAvg = 0, totToday = 0, todayHasData = false;
+  var totPast = {{}};
+  past.forEach(function(pd){{ totPast[pd] = 0; }});
+  HOURS.forEach(function(h) {{
+    var tv=T[h], av=A[h]||0;
+    if (tv !== null && tv !== undefined) {{
+      totToday += tv;
+      totAvg   += av;   // avg only for completed slots
+      todayHasData = true;
+    }}
+    past.forEach(function(pd){{
+      totPast[pd] += (ALL_T[pd]||{{}})[String(h)]||0;
+    }});
+  }});
+  var totTodayTd = todayHasData
+    ? '<td style="background:#FCE4EC;color:#880E4F;font-weight:700">'+totToday.toLocaleString()+'</td>'
+    : '<td class="curr-pending">—</td>';
+  var totPastTDs = '';
+  past.forEach(function(pd){{
+    totPastTDs += '<td style="font-weight:700">'+totPast[pd].toLocaleString()+'</td>';
+  }});
+  var totalRow =
+    '<tr style="background:#f0f4ff;border-top:2px solid #90CAF9;font-weight:700">'+
+    '<td class="curr-hour-cell" style="font-weight:700;color:#1565C0">Total</td>'+
+    '<td class="curr-avg-cell" style="font-weight:700">'+Math.round(totAvg).toLocaleString()+'</td>'+
+    totTodayTd + totPastTDs + '</tr>';
+
   document.getElementById('curr-table-wrap').innerHTML =
     '<table class="curr-table"><thead><tr>'+thCells+'</tr></thead>'+
-    '<tbody>'+rows+'</tbody></table>';
+    '<tbody>'+rows+totalRow+'</tbody></table>';
 
   // ── Spike Remarks ───────────────────────────────────────────────
   var spHours = HOURS.filter(function(h){{ return spikeOf(T[h], A[h]) !== null; }});
