@@ -74,6 +74,12 @@ COLLAPSED_CLASSES  = {"Missed Calls",
 EXCLUDED_CLASSES   = {"Internet Related Issues", "Payment Related Issues"}
 COLLAPSED_SENTINEL = "__ALL__"
 
+def fmt_sales_class_label(src_cls: str) -> str:
+    """Strip 'Sales-' prefix for display. E.g. 'Sales-App Issues' → 'App Issues'."""
+    if src_cls.startswith("Sales-"):
+        return src_cls[len("Sales-"):]
+    return src_cls
+
 counts = defaultdict(lambda: defaultdict(int))
 all_dates = set()
 for r in rows:
@@ -82,7 +88,13 @@ for r in rows:
     cls = display_class(src_cls)
     if cls in EXCLUDED_CLASSES:
         continue
-    key_code = COLLAPSED_SENTINEL if cls in COLLAPSED_CLASSES else r["DISPOSITION_CODE"]
+    # Sales Queue: group sub-rows by DISPOSITION_CLASS (not code)
+    if cls == "Sales Queue":
+        key_code = src_cls  # e.g. "Sales-App Issues", "Sales-Next Steps"
+    elif cls in COLLAPSED_CLASSES:
+        key_code = COLLAPSED_SENTINEL
+    else:
+        key_code = r["DISPOSITION_CODE"]
     counts[(cls, key_code)][d] += int(r["CALL_COUNT"])
     all_dates.add(d)
 
@@ -454,7 +466,9 @@ def month_table(ym):
             mtd  = avg(all_day_vals.values())
             prev = avg(prev_vals.values())
 
-            cells = [f'<td class="disp disp-code">{html.escape(code)}</td>']
+            # Display label: strip "Sales-" prefix for Sales Queue sub-rows
+            code_label = fmt_sales_class_label(code) if cls == "Sales Queue" else code
+            cells = [f'<td class="disp disp-code">{html.escape(code_label)}</td>']
             cells.append(cell_html(mtd, prev, is_mtd=True,
                                    drill=mk_drill(cls, code, "mtd")))
             cells.append(cell_html(prev, None, is_prev=True,

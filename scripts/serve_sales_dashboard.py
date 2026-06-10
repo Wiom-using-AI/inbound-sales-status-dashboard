@@ -100,8 +100,13 @@ def build_where(cls: str, code: str, scope: str, day: str, ym: str) -> str:
 
     # --- class / code filter ---
     if cls == "Sales Queue":
-        q = ",".join("'" + sql_quote(c) + "'" for c in SALES_SOURCE_CLASSES)
-        wh.append(f"DISPOSITION_CLASS IN ({q})")
+        if code and code.startswith("Sales-"):
+            # Sub-class row clicked (e.g. "Sales-App Issues") — filter by that class
+            wh.append(f"DISPOSITION_CLASS = '{sql_quote(code)}'")
+        else:
+            # Top-level Sales Queue row — show all source classes
+            q = ",".join("'" + sql_quote(c) + "'" for c in SALES_SOURCE_CLASSES)
+            wh.append(f"DISPOSITION_CLASS IN ({q})")
     elif cls in ("Missed Calls", "(Unclassified)"):
         wh.append("(DISPOSITION_CLASS IS NULL OR TRIM(DISPOSITION_CLASS) = '')")
     elif cls == "Booking Queue":
@@ -109,8 +114,8 @@ def build_where(cls: str, code: str, scope: str, day: str, ym: str) -> str:
     elif cls:
         wh.append(f"DISPOSITION_CLASS = '{sql_quote(cls)}'")
 
-    # Always apply code filter when a specific sub-disposition is clicked
-    if code:
+    # Code filter: only for non-Sales-Queue sub-class rows
+    if code and not (cls == "Sales Queue" and code.startswith("Sales-")):
         wh.append(f"DISPOSITION_CODE = '{sql_quote(code)}'")
 
     return " AND ".join(wh)
