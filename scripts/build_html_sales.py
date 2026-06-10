@@ -61,7 +61,10 @@ CLASS_MERGE_EXACT = {
 def display_class(src_cls: str) -> str:
     if src_cls in CLASS_MERGE_EXACT:
         return CLASS_MERGE_EXACT[src_cls]
-    if src_cls.startswith("Sales-") or src_cls.startswith("Sales "):
+    # Catch all Sale* variants → Sales Queue
+    if (src_cls.startswith("Sales-") or src_cls.startswith("Sales/")
+            or src_cls.startswith("Sales ") or src_cls.startswith("Sale_")
+            or src_cls.startswith("Sale/")):
         return "Sales Queue"
     if src_cls == "(Unclassified)" or src_cls == "" or src_cls is None:
         return "Missed Calls"
@@ -74,10 +77,20 @@ COLLAPSED_CLASSES  = {"Missed Calls",
 EXCLUDED_CLASSES   = {"Internet Related Issues", "Payment Related Issues"}
 COLLAPSED_SENTINEL = "__ALL__"
 
+_SALES_PREFIXES = [
+    "Sales/Status-",   # "Sales/Status-App Issues"      → "App Issues"
+    "Sale/Status_",    # "Sale/Status_Serviceability…"  → "Serviceability…"
+    "Sales-",          # "Sales-App Issues"              → "App Issues"
+    "Sales/",          # "Sales/…"                      → "…"
+    "Sale_",           # "Sale_Booking Process…"         → "Booking Process…"
+    "Sale/",           # "Sale/…"                        → "…"
+]
+
 def fmt_sales_class_label(src_cls: str) -> str:
-    """Strip 'Sales-' prefix for display. E.g. 'Sales-App Issues' → 'App Issues'."""
-    if src_cls.startswith("Sales-"):
-        return src_cls[len("Sales-"):]
+    """Strip Sale*/Sales* prefix for a clean sub-row label."""
+    for pfx in _SALES_PREFIXES:
+        if src_cls.startswith(pfx):
+            return src_cls[len(pfx):]
     return src_cls
 
 counts = defaultdict(lambda: defaultdict(int))

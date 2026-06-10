@@ -39,15 +39,16 @@ if not API_KEY:
 if not API_KEY:
     print("WARNING: METABASE_API_KEY not set — drill-through will fail.")
 
-# -------- Sales Queue rollup: all source classes ----------
-SALES_SOURCE_CLASSES = [
-    "Sales-App Issues",
-    "Sales-Next Steps",
-    "Sales-Next Steps - Old Contruct",
-    "Sales-Pause",
-    "Sales-System Understanding",
-    "Sales-System Understanding - Old",
-]
+# -------- Sales Queue rollup: SQL pattern matches all Sale*/Sales* classes ----------
+# Matches: Sales-*, Sales/*, Sale_*, Sale/* (same logic as display_class in builder)
+SALES_QUEUE_SQL_FILTER = (
+    "("
+    "TRIM(DISPOSITION_CLASS) LIKE 'Sales-%' OR "
+    "TRIM(DISPOSITION_CLASS) LIKE 'Sales/%' OR "
+    "TRIM(DISPOSITION_CLASS) LIKE 'Sale\\_%' ESCAPE '\\' OR "
+    "TRIM(DISPOSITION_CLASS) LIKE 'Sale/%'"
+    ")"
+)
 
 # columns we return to the browser
 RAW_COLS = [
@@ -100,13 +101,13 @@ def build_where(cls: str, code: str, scope: str, day: str, ym: str) -> str:
 
     # --- class / code filter ---
     if cls == "Sales Queue":
-        if code and code.startswith("Sales-"):
-            # Sub-class row clicked (e.g. "Sales-App Issues") — filter by that class
+        if code and (code.startswith("Sales-") or code.startswith("Sales/")
+                     or code.startswith("Sale_") or code.startswith("Sale/")):
+            # Sub-class row clicked — filter by that specific source class
             wh.append(f"DISPOSITION_CLASS = '{sql_quote(code)}'")
         else:
-            # Top-level Sales Queue row — show all source classes
-            q = ",".join("'" + sql_quote(c) + "'" for c in SALES_SOURCE_CLASSES)
-            wh.append(f"DISPOSITION_CLASS IN ({q})")
+            # Top-level Sales Queue row — match all Sale*/Sales* classes
+            wh.append(SALES_QUEUE_SQL_FILTER)
     elif cls in ("Missed Calls", "(Unclassified)"):
         wh.append("(DISPOSITION_CLASS IS NULL OR TRIM(DISPOSITION_CLASS) = '')")
     elif cls == "Booking Queue":
@@ -114,8 +115,12 @@ def build_where(cls: str, code: str, scope: str, day: str, ym: str) -> str:
     elif cls:
         wh.append(f"DISPOSITION_CLASS = '{sql_quote(cls)}'")
 
-    # Code filter: only for non-Sales-Queue sub-class rows
-    if code and not (cls == "Sales Queue" and code.startswith("Sales-")):
+    # Code filter: skip for Sales Queue sub-class rows (those filter by CLASS above)
+    _is_sales_cls_code = cls == "Sales Queue" and code and (
+        code.startswith("Sales-") or code.startswith("Sales/")
+        or code.startswith("Sale_") or code.startswith("Sale/")
+    )
+    if code and not _is_sales_cls_code:
         wh.append(f"DISPOSITION_CODE = '{sql_quote(code)}'")
 
     return " AND ".join(wh)
