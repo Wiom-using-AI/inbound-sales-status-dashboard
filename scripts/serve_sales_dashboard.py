@@ -39,9 +39,18 @@ if not API_KEY:
 if not API_KEY:
     print("WARNING: METABASE_API_KEY not set — drill-through will fail.")
 
-# -------- Sales Queue rollup: SQL pattern matches all Sale*/Sales* classes ----------
-# Matches: Sales-*, Sales/*, Sale_*, Sale/* (same logic as display_class in builder)
-SALES_QUEUE_SQL_FILTER = (
+# -------- Sales Queue rollup --------
+# Pre-Jun 2026: only Sales-* classes
+SALES_SOURCE_CLASSES = [
+    "Sales-App Issues",
+    "Sales-Next Steps",
+    "Sales-Next Steps - Old Contruct",
+    "Sales-Pause",
+    "Sales-System Understanding",
+    "Sales-System Understanding - Old",
+]
+# Jun 2026+: all Sale_*, Sale/*, Sales/* variants also merge in
+SALES_QUEUE_SQL_FILTER_EXTENDED = (
     "("
     "TRIM(DISPOSITION_CLASS) LIKE 'Sales-%' OR "
     "TRIM(DISPOSITION_CLASS) LIKE 'Sales/%' OR "
@@ -49,6 +58,16 @@ SALES_QUEUE_SQL_FILTER = (
     "TRIM(DISPOSITION_CLASS) LIKE 'Sale/%'"
     ")"
 )
+SALES_EXTENDED_MERGE_FROM = date(2026, 6, 1)
+
+def _is_extended_sales_month(scope: str, day: str, ym: str) -> bool:
+    """True if this query's data falls in June 2026 or later."""
+    if scope == "day" and day:
+        return date.fromisoformat(day) >= SALES_EXTENDED_MERGE_FROM
+    if scope in ("mtd", "prev") and ym:
+        y, m = ym.split("-")
+        return date(int(y), int(m), 1) >= SALES_EXTENDED_MERGE_FROM
+    return False
 
 # columns we return to the browser
 RAW_COLS = [
@@ -101,13 +120,18 @@ def build_where(cls: str, code: str, scope: str, day: str, ym: str) -> str:
 
     # --- class / code filter ---
     if cls == "Sales Queue":
+        extended = _is_extended_sales_month(scope, day, ym)
         if code and (code.startswith("Sales-") or code.startswith("Sales/")
                      or code.startswith("Sale_") or code.startswith("Sale/")):
             # Sub-class row clicked — filter by that specific source class
             wh.append(f"DISPOSITION_CLASS = '{sql_quote(code)}'")
+        elif extended:
+            # Jun 2026+: match all Sale*/Sales* classes
+            wh.append(SALES_QUEUE_SQL_FILTER_EXTENDED)
         else:
-            # Top-level Sales Queue row — match all Sale*/Sales* classes
-            wh.append(SALES_QUEUE_SQL_FILTER)
+            # Pre-Jun 2026: only original Sales-* classes
+            q = ",".join("'" + sql_quote(c) + "'" for c in SALES_SOURCE_CLASSES)
+            wh.append(f"DISPOSITION_CLASS IN ({q})")
     elif cls in ("Missed Calls", "(Unclassified)"):
         wh.append("(DISPOSITION_CLASS IS NULL OR TRIM(DISPOSITION_CLASS) = '')")
     elif cls == "Booking Queue":

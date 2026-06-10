@@ -58,14 +58,20 @@ CLASS_MERGE_EXACT = {
     "Sales-System Understanding":       "Sales Queue",
     "Sales-System Understanding - Old": "Sales Queue",
 }
-def display_class(src_cls: str) -> str:
+# From June 2026 onwards, all Sale_*/Sale/* /Sales/* variants merge into Sales Queue
+SALES_EXTENDED_MERGE_FROM = date(2026, 6, 1)
+
+def display_class(src_cls: str, d: date = None) -> str:
     if src_cls in CLASS_MERGE_EXACT:
         return CLASS_MERGE_EXACT[src_cls]
-    # Catch all Sale* variants → Sales Queue
-    if (src_cls.startswith("Sales-") or src_cls.startswith("Sales/")
-            or src_cls.startswith("Sales ") or src_cls.startswith("Sale_")
-            or src_cls.startswith("Sale/")):
+    # Sales- always merged (all months)
+    if src_cls.startswith("Sales-") or src_cls.startswith("Sales "):
         return "Sales Queue"
+    # Sale_*, Sale/*, Sales/* — only merged from June 2026 onwards
+    if (d is None or d >= SALES_EXTENDED_MERGE_FROM):
+        if (src_cls.startswith("Sales/") or src_cls.startswith("Sale_")
+                or src_cls.startswith("Sale/")):
+            return "Sales Queue"
     if src_cls == "(Unclassified)" or src_cls == "" or src_cls is None:
         return "Missed Calls"
     return src_cls
@@ -98,12 +104,12 @@ all_dates = set()
 for r in rows:
     d = date.fromisoformat(r["CALL_DATE"])
     src_cls = r["DISPOSITION_CLASS"]
-    cls = display_class(src_cls)
+    cls = display_class(src_cls, d)   # pass date for cutover logic
     if cls in EXCLUDED_CLASSES:
         continue
     # Sales Queue: group sub-rows by DISPOSITION_CLASS (not code)
     if cls == "Sales Queue":
-        key_code = src_cls  # e.g. "Sales-App Issues", "Sales-Next Steps"
+        key_code = src_cls  # e.g. "Sales-App Issues", "Sale_Booking Process…"
     elif cls in COLLAPSED_CLASSES:
         key_code = COLLAPSED_SENTINEL
     else:
