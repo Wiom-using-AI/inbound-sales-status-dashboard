@@ -100,6 +100,8 @@ def fmt_sales_class_label(src_cls: str) -> str:
     return src_cls
 
 counts = defaultdict(lambda: defaultdict(int))
+# 3-level for Sales Queue: (cls, src_cls, disposition_code) → {date: count}
+counts_l3 = defaultdict(lambda: defaultdict(int))
 all_dates = set()
 for r in rows:
     d = date.fromisoformat(r["CALL_DATE"])
@@ -110,12 +112,21 @@ for r in rows:
     # Sales Queue: group sub-rows by DISPOSITION_CLASS (not code)
     if cls == "Sales Queue":
         key_code = src_cls  # e.g. "Sales-App Issues", "Sale_Booking Process…"
+        # Also track the disposition code as level-3
+        l3_code = (r.get("DISPOSITION_CODE") or "").strip()
+        if l3_code and l3_code != "(Unclassified)":
+            counts_l3[(cls, src_cls, l3_code)][d] += int(r["CALL_COUNT"])
     elif cls in COLLAPSED_CLASSES:
         key_code = COLLAPSED_SENTINEL
     else:
         key_code = r["DISPOSITION_CODE"]
     counts[(cls, key_code)][d] += int(r["CALL_COUNT"])
     all_dates.add(d)
+
+# l3_codes: (cls, src_cls) -> set of disposition codes
+l3_codes = defaultdict(set)
+for cls, src_cls, code in counts_l3.keys():
+    l3_codes[(cls, src_cls)].add(code)
 
 by_month = defaultdict(set)
 for d in all_dates:
@@ -485,17 +496,74 @@ def month_table(ym):
             mtd  = avg(all_day_vals.values())
             prev = avg(prev_vals.values())
 
-            # Display label: strip "Sales-" prefix for Sales Queue sub-rows
-            code_label = fmt_sales_class_label(code) if cls == "Sales Queue" else code
-            cells = [f'<td class="disp disp-code">{html.escape(code_label)}</td>']
-            cells.append(cell_html(mtd, prev, is_mtd=True,
-                                   drill=mk_drill(cls, code, "mtd")))
-            cells.append(cell_html(prev, None, is_prev=True,
-                                   drill=mk_drill(cls, code, "prev")))
-            for d in days_desc:
-                cells.append(cell_html(day_vals.get(d, 0), mtd,
-                                       drill=mk_drill(cls, code, "day", d)))
-            body_rows.append(f'<tr class="row-code code-of-{cls_id}">{"".join(cells)}</tr>')
+            if cls == "Sales Queue":
+                # L2 row: disposition class, collapsible to show L3 codes
+                code_label = fmt_sales_class_label(code)
+                # Build safe sub_id for class names
+                sub_id = (cls_id + "__" + code.replace(" ", "_")
+                          .replace("(", "").replace(")", "")
+                          .replace("/", "_").replace("&", "")
+                          .replace("-", "_").replace(".", ""))
+                sub_id = html.escape(sub_id)
+                # Get L3 codes for this disposition class
+                l3_for_this = set(l3_codes.get((cls, code), set()))
+                if is_current_month:
+                    l3_for_this = {c for c in l3_for_this
+                                   if sum(counts_l3[(cls, code, c)].get(d, 0)
+                                          for d in all_days_in_month) > 0}
+                has_l3 = bool(l3_for_this)
+                toggle_l3_attr = f' data-toggle-l3="{sub_id}"' if has_l3 else ''
+                toggle_l3_icon = ('<span class="toggle-icon-l3">&#9660;</span> '
+                                  if has_l3 else
+                                  '<span style="display:inline-block;width:13px"></span> ')
+                cells = [f'<td class="disp disp-code disp-code-l2"{toggle_l3_attr}>'
+                         f'{toggle_l3_icon}{html.escape(code_label)}</td>']
+                cells.append(cell_html(mtd, prev, is_mtd=True,
+                                       drill=mk_drill(cls, code, "mtd")))
+                cells.append(cell_html(prev, None, is_prev=True,
+                                       drill=mk_drill(cls, code, "prev")))
+                for d in days_desc:
+                    cells.append(cell_html(day_vals.get(d, 0), mtd,
+                                           drill=mk_drill(cls, code, "day", d)))
+                body_rows.append(f'<tr class="row-code code-of-{cls_id}">{"".join(cells)}</tr>')
+
+                # L3 rows: disposition codes under this class (hidden by default)
+                if has_l3:
+                    l3_mtds = []
+                    for l3c in l3_for_this:
+                        l3_all = {d: counts_l3[(cls, code, l3c)].get(d, 0) for d in all_days_in_month}
+                        l3_mtds.append((l3c, avg(l3_all.values())))
+                    l3_mtds.sort(key=lambda x: x[1], reverse=True)
+                    for l3c, _ in l3_mtds:
+                        l3_day  = {d: counts_l3[(cls, code, l3c)].get(d, 0) for d in days_desc}
+                        l3_prev = {d: counts_l3[(cls, code, l3c)].get(d, 0) for d in prev_days}
+                        l3_all  = {d: counts_l3[(cls, code, l3c)].get(d, 0) for d in all_days_in_month}
+                        l3_mtd     = avg(l3_all.values())
+                        l3_prev_avg = avg(l3_prev.values())
+                        l3_cells = [f'<td class="disp disp-code disp-code-l3">'
+                                    f'{html.escape(l3c)}</td>']
+                        # drill uses src_cls as cls so serve script can filter DISPOSITION_CLASS
+                        l3_cells.append(cell_html(l3_mtd, l3_prev_avg, is_mtd=True,
+                                                  drill=mk_drill(code, l3c, "mtd")))
+                        l3_cells.append(cell_html(l3_prev_avg, None, is_prev=True,
+                                                  drill=mk_drill(code, l3c, "prev")))
+                        for d in days_desc:
+                            l3_cells.append(cell_html(l3_day.get(d, 0), l3_mtd,
+                                                      drill=mk_drill(code, l3c, "day", d)))
+                        body_rows.append(
+                            f'<tr class="row-code row-code-l3 hidden code-l3-of-{sub_id}">'
+                            f'{"".join(l3_cells)}</tr>')
+            else:
+                # Non-Sales Queue: existing behaviour
+                cells = [f'<td class="disp disp-code">{html.escape(code)}</td>']
+                cells.append(cell_html(mtd, prev, is_mtd=True,
+                                       drill=mk_drill(cls, code, "mtd")))
+                cells.append(cell_html(prev, None, is_prev=True,
+                                       drill=mk_drill(cls, code, "prev")))
+                for d in days_desc:
+                    cells.append(cell_html(day_vals.get(d, 0), mtd,
+                                           drill=mk_drill(cls, code, "day", d)))
+                body_rows.append(f'<tr class="row-code code-of-{cls_id}">{"".join(cells)}</tr>')
 
     # TOTAL row
     tot_mtd  = avg(total_day.values())
@@ -841,6 +909,20 @@ table.dash td.disp-code {{ padding-left: 26px; font-weight: 400; }}
 .toggle-icon {{ display: inline-block; font-size: 9px; margin-right: 4px;
   transition: transform .2s; color: var(--muted); }}
 .toggle-icon.collapsed {{ transform: rotate(-90deg); }}
+/* L2 sub-rows under Sales Queue — clickable to expand L3 */
+table.dash td.disp-code-l2 {{ cursor: pointer; user-select: none; }}
+/* L3 toggle icon — starts collapsed (rotated) */
+.toggle-icon-l3 {{ display: inline-block; font-size: 9px; margin-right: 4px;
+  transition: transform .2s; color: var(--muted);
+  transform: rotate(-90deg); }}
+.toggle-icon-l3.expanded {{ transform: rotate(0deg); }}
+/* L3 rows (disposition codes under Sales Queue sub-class) */
+table.dash td.disp-code-l3 {{ padding-left: 46px; color: #7B1FA2; font-style: italic; font-weight: 400; }}
+table.dash tr.row-code-l3 td {{ background: #FDF4FF; }}
+table.dash tr.row-code-l3 td:first-child {{ background: #FDF4FF; }}
+table.dash tr.row-code-l3:hover td {{ background: #F3E5F5; }}
+table.dash tr.row-code-l3:hover td:first-child {{ background: #F3E5F5; }}
+table.dash tr.row-code-l3.hidden {{ display: none; }}
 
 /* absolute number is ALWAYS black */
 table.dash td.num {{ color: var(--text); text-align: center; min-width: 100px;
@@ -1062,7 +1144,7 @@ document.querySelectorAll('table.dash td.num').forEach(td => {{
   td.addEventListener('dblclick', () => openDrill(td));
 }});
 
-// ---------------- collapsible categories ----------------
+// ---------------- collapsible categories (L1 → L2) ----------------
 document.querySelectorAll('td[data-toggle]').forEach(td => {{
   td.addEventListener('click', () => {{
     const cls = td.dataset.toggle;
@@ -1071,6 +1153,31 @@ document.querySelectorAll('td[data-toggle]').forEach(td => {{
     const isHidden = rows.length && rows[0].classList.contains('hidden');
     rows.forEach(r => r.classList.toggle('hidden', !isHidden));
     if (icon) icon.classList.toggle('collapsed', !isHidden);
+    // When collapsing, also hide all L3 rows under this class and reset their icons
+    if (!isHidden) {{
+      td.closest('table').querySelectorAll('tr.row-code-l3').forEach(r => {{
+        if (Array.from(r.classList).some(c => c.startsWith('code-l3-of-' + cls + '__')))
+          r.classList.add('hidden');
+      }});
+      td.closest('table').querySelectorAll('td[data-toggle-l3]').forEach(l3td => {{
+        if (l3td.dataset.toggleL3.startsWith(cls + '__')) {{
+          const l3icon = l3td.querySelector('.toggle-icon-l3');
+          if (l3icon) l3icon.classList.remove('expanded');
+        }}
+      }});
+    }}
+  }});
+}});
+
+// ---------------- collapsible L2 → L3 (Sales Queue sub-rows) ----------------
+document.querySelectorAll('td[data-toggle-l3]').forEach(td => {{
+  td.addEventListener('click', () => {{
+    const subId = td.dataset.toggleL3;
+    const icon = td.querySelector('.toggle-icon-l3');
+    const rows = td.closest('table').querySelectorAll('tr.code-l3-of-' + subId);
+    const isHidden = rows.length && rows[0].classList.contains('hidden');
+    rows.forEach(r => r.classList.toggle('hidden', !isHidden));
+    if (icon) icon.classList.toggle('expanded', isHidden);
   }});
 }});
 
