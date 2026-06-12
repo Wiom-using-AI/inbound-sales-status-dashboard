@@ -29,6 +29,7 @@ import os as _os
 _BASE = Path(__file__).resolve().parent.parent
 SRC = Path(_os.environ.get("DATA_DIR", str(_BASE / "data"))) / "sales_daily.csv"
 SRC_METRICS = Path(_os.environ.get("DATA_DIR", str(_BASE / "data"))) / "sales_metrics.csv"
+SRC_HOURLY  = Path(_os.environ.get("DATA_DIR", str(_BASE / "data"))) / "sales_hourly.csv"
 OUT_DIR = _BASE / "output" / "web_sales"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 OUT = OUT_DIR / "index.html"
@@ -49,6 +50,14 @@ if SRC_METRICS.exists():
             "agents":     int(mr.get("AGENTS_LOGGED", 0)),
             "queue_wait": float(mr.get("AVG_QUEUE_WAIT_SEC") or 0),
         }
+
+# Load hourly data (IST) for Current tab — {date: {hour: count}}
+hourly_by_date = defaultdict(lambda: defaultdict(int))
+if SRC_HOURLY.exists():
+    for hr in csv.DictReader(SRC_HOURLY.open()):
+        hd = date.fromisoformat(hr["CALL_DATE"])
+        hh = int(hr["CALL_HOUR"])
+        hourly_by_date[hd][hh] = int(hr["CALL_COUNT"])
 
 CLASS_MERGE_EXACT = {
     "Sales-App Issues":                 "Sales Queue",
@@ -653,10 +662,258 @@ top10_head = "<tr>" + "<th>Sub-category Issue</th>" + "".join(
 ) + "</tr>"
 top10_table = f'<table class="dash"><thead>{top10_head}</thead><tbody>{"".join(top10_rows)}</tbody></table>'
 
+# ---------------------------------------------------------------- Current tab
+
+# Build hourly JSON: {dateStr: [count_h0 .. count_h23]}
+hourly_data_json = {}
+for _hd in sorted(hourly_by_date.keys()):
+    hourly_data_json[_hd.isoformat()] = [hourly_by_date[_hd].get(h, 0) for h in range(24)]
+
+# CSS for Current tab stat cards (plain string — no f-string escaping needed)
+cur_tab_css = """
+/* ---- Current tab ---- */
+.cur-stat-card { background: #fff; padding: 12px 20px; border-radius: 10px;
+  border: 1px solid var(--pink-light); min-width: 130px;
+  transition: transform .15s, box-shadow .15s; }
+.cur-stat-card:hover { transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(233,30,140,.12); }
+.cur-stat-card .k { color: var(--muted); font-size: 10px; text-transform: uppercase;
+  letter-spacing: .6px; margin-bottom: 2px; }
+.cur-stat-card .v { font-weight: 700; font-size: 22px; color: var(--pink); }
+"""
+
+# JS for Current tab (plain string — curly braces don't need escaping here)
+cur_tab_js = (
+    "// ---- Current Tab ----\n"
+    "const HOURLY_DATA = " + json.dumps(hourly_data_json) + ";\n"
+    + """
+const _curDates = Object.keys(HOURLY_DATA).sort().reverse();
+
+(function() {
+  const sel = document.getElementById('curDateSel');
+  if (!sel) return;
+  const _months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  _curDates.forEach(d => {
+    const opt = document.createElement('option');
+    opt.value = d;
+    const p = d.split('-');
+    opt.textContent = p[2] + '-' + _months[parseInt(p[1])-1];
+    sel.appendChild(opt);
+  });
+  sel.addEventListener('change', () => renderCurrent(sel.value));
+  // If Current tab is already the active tab on page load, render immediately
+  const panel = document.getElementById('tab-current');
+  if (panel && panel.classList.contains('active') && _curDates.length > 0) {
+    setTimeout(() => renderCurrent(_curDates[0]), 100);
+  }
+})();
+
+// Re-render whenever the user clicks the Current tab button
+const _curBtn = document.querySelector('.tab-btn[data-target="tab-current"]');
+if (_curBtn) {
+  _curBtn.addEventListener('click', () => {
+    setTimeout(() => {
+      const sel = document.getElementById('curDateSel');
+      if (sel && sel.value) renderCurrent(sel.value);
+    }, 60);
+  });
+}
+
+function _spikeThreshH(v) {
+  if (v >= 100) return 0.15;
+  if (v >= 20)  return 0.25;
+  return 1.00;
+}
+function _isCurSpiked(t, a) {
+  if (!a || a <= 0 || t <= 0) return false;
+  const pct = (t - a) / a;
+  return pct > 0 && pct >= _spikeThreshH(t);
+}
+function _curPct(t, a) {
+  if (!a || a <= 0) return 0;
+  return Math.round((t - a) / a * 100);
+}
+
+let curChartInst = null;
+
+function renderCurrent(selDate) {
+  const todayData = HOURLY_DATA[selDate] || new Array(24).fill(0);
+  const selIdx = _curDates.indexOf(selDate);
+  const prev7  = _curDates.slice(selIdx + 1, selIdx + 8);
+
+  // 7-day average per hour
+  const avg7d = Array.from({length: 24}, (_, h) => {
+    if (prev7.length === 0) return 0;
+    const vals = prev7.map(d => (HOURLY_DATA[d] || [])[h] || 0);
+    return vals.reduce((a, b) => a + b, 0) / prev7.length;
+  });
+
+  const totalToday = todayData.reduce((a, b) => a + b, 0);
+  const totalAvg7d = avg7d.reduce((a, b) => a + b, 0);
+  const vsAvgPct   = totalAvg7d > 0
+    ? Math.round((totalToday - totalAvg7d) / totalAvg7d * 100) : 0;
+  const spikeSlots = todayData.filter((v, h) => _isCurSpiked(v, avg7d[h])).length;
+
+  // Stat cards
+  const upDir   = vsAvgPct > 0 ? '&#8593; ' : vsAvgPct < 0 ? '&#8595; ' : '';
+  const vsStyle = vsAvgPct > 0 ? 'color:#C62828'
+                : vsAvgPct < 0 ? 'color:#2E7D32' : 'color:#333';
+  document.getElementById('curStats').innerHTML =
+    '<div class="cur-stat-card"><div class="k">Calls (Today)</div>' +
+      '<div class="v">' + fmtNum(totalToday) + '</div></div>' +
+    '<div class="cur-stat-card"><div class="k">7D Avg (same slots)</div>' +
+      '<div class="v">' + fmtNum(Math.round(totalAvg7d)) + '</div></div>' +
+    '<div class="cur-stat-card"><div class="k">vs 7D Avg</div>' +
+      '<div class="v" style="' + vsStyle + '">' + upDir + Math.abs(vsAvgPct) + '%</div></div>' +
+    '<div class="cur-stat-card"><div class="k">Spike Slots</div>' +
+      '<div class="v" style="' + (spikeSlots > 0 ? 'color:#C62828' : 'color:var(--pink)') + '">' +
+      spikeSlots + '</div></div>';
+
+  // Chart
+  const hours     = Array.from({length: 24}, (_, i) => i + ':00');
+  const barColors = todayData.map((v, h) =>
+    _isCurSpiked(v, avg7d[h]) ? 'rgba(198,40,40,0.75)' : 'rgba(233,30,140,0.45)');
+  const barBorders = todayData.map((v, h) =>
+    _isCurSpiked(v, avg7d[h]) ? '#C62828' : '#E91E8C');
+
+  if (curChartInst) { curChartInst.destroy(); curChartInst = null; }
+  const ctx = document.getElementById('curChart');
+  if (!ctx) return;
+  curChartInst = new Chart(ctx.getContext('2d'), {
+    data: {
+      labels: hours,
+      datasets: [
+        {
+          type: 'bar',
+          label: 'Today (' + selDate.slice(5) + ')',
+          data: todayData,
+          backgroundColor: barColors,
+          borderColor: barBorders,
+          borderWidth: 1,
+          order: 2,
+        },
+        {
+          type: 'line',
+          label: '7D Avg',
+          data: avg7d.map(v => Math.round(v * 10) / 10),
+          borderColor: '#1E88E5',
+          backgroundColor: 'rgba(30,136,229,0.1)',
+          tension: 0.3,
+          borderWidth: 2,
+          pointRadius: 3,
+          fill: false,
+          order: 1,
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        title: {
+          display: true,
+          text: 'Hourly Call Volume — ' + selDate + ' vs 7-Day Average (IST)',
+        },
+        legend: { position: 'top' },
+      },
+      scales: {
+        x: { title: { display: true, text: 'Hour (IST)' } },
+        y: { title: { display: true, text: 'Calls' }, beginAtZero: true },
+      }
+    }
+  });
+
+  // Table
+  const _mns = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  function _fmtD(d) {
+    const p = d.split('-');
+    return p[2] + '-' + _mns[parseInt(p[1])-1];
+  }
+
+  let thtml = '<div style="overflow-x:auto;margin-top:16px">'
+    + '<table class="dash" style="min-width:640px"><thead><tr>';
+  thtml += '<th style="min-width:110px">Hour (IST)</th>';
+  thtml += '<th style="min-width:80px">7D Avg</th>';
+  thtml += '<th style="min-width:80px">Today</th>';
+  thtml += '<th style="min-width:90px">vs 7D Avg</th>';
+  prev7.forEach(d => { thtml += '<th style="min-width:65px">' + _fmtD(d) + '</th>'; });
+  thtml += '</tr></thead><tbody>';
+
+  for (let h = 0; h < 24; h++) {
+    const t      = todayData[h];
+    const a      = avg7d[h];
+    const spiked = _isCurSpiked(t, a);
+    const pct    = _curPct(t, a);
+    let pctStr;
+    if (a > 0) {
+      if      (pct > 0) pctStr = '<span style="color:#C62828;font-weight:600;font-size:9px;display:block">+'
+                                  + pct + '% &#8593;</span>';
+      else if (pct < 0) pctStr = '<span style="color:#2E7D32;font-size:9px;display:block">'
+                                  + pct + '%</span>';
+      else              pctStr = '0%';
+    } else { pctStr = '—'; }
+
+    const todayStyle = spiked ? 'background:#FFEBEE;font-weight:700' : '';
+    thtml += '<tr>';
+    thtml += '<td class="disp" style="text-align:center;padding-left:10px">'
+           + h + ':00–' + (h+1) + ':00</td>';
+    thtml += '<td class="num mtd avgcol">'
+           + (a > 0 ? (Math.round(a * 10)/10).toFixed(1) : '0') + '</td>';
+    thtml += '<td class="num" style="' + todayStyle + '">' + t
+           + (spiked ? '<span class="spike">(+' + pct + '%) &#8593;</span>' : '') + '</td>';
+    thtml += '<td class="num">' + pctStr + '</td>';
+    prev7.forEach(d => {
+      const v = (HOURLY_DATA[d] || [])[h] || 0;
+      thtml += '<td class="num">' + v + '</td>';
+    });
+    thtml += '</tr>';
+  }
+  thtml += '</tbody></table></div>';
+  document.getElementById('curTable').innerHTML = thtml;
+}
+"""
+)
+
+# Current tab panel HTML
+if not hourly_data_json:
+    cur_tab_panel = (
+        '<section id="tab-current" class="tab-panel">'
+        '<div style="padding:60px 32px;text-align:center;color:#666;font-size:13px">'
+        'No hourly data yet &mdash; run <code>pull_ameyo_sales.py</code> to fetch.'
+        '</div></section>'
+    )
+else:
+    cur_tab_panel = (
+        '<section id="tab-current" class="tab-panel">'
+        '<div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:16px">'
+          '<label style="font-weight:600;font-size:13px">View Date:&nbsp;'
+            '<select id="curDateSel" style="padding:6px 12px;border:1px solid #D0D0D0;'
+            'border-radius:6px;font-size:13px;cursor:pointer"></select>'
+          '</label>'
+          '<span style="color:#666;font-size:11.5px">Hourly breakdown vs 7-day average (IST)</span>'
+        '</div>'
+        '<div id="curStats" style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:16px"></div>'
+        '<div class="chart-wrap" style="position:relative;height:320px;margin-bottom:0">'
+          '<canvas id="curChart"></canvas>'
+        '</div>'
+        '<div id="curTable"></div>'
+        '<div class="legend" style="margin-top:12px">'
+          '<span class="pill">&#x26A0; Spike Basis</span>'
+          ' value <b>&ge;&thinsp;100 &rarr; +15%</b> &middot;'
+          ' value <b>20&ndash;99 &rarr; +25%</b> &middot;'
+          ' value <b>&lt;&thinsp;20 &rarr; +100%</b>'
+          ' &middot; Compared to 7-day average at same hour slot'
+        '</div>'
+        '</section>'
+    )
+
 # ---------------------------------------------------------------- tabs
 
 tabs_buttons = []
 tabs_panels = []
+# Current tab — always first
+tabs_buttons.append('<button class="tab-btn" data-target="tab-current">Current</button>')
+tabs_panels.append(cur_tab_panel)
 # month tabs (latest first, only display months)
 for ym in reversed(display_months):
     tid = f"tab-{ym[0]}-{ym[1]:02d}"
@@ -1008,6 +1265,7 @@ footer {{ color: var(--muted); font-size: 11px; text-align: center; padding: 24p
 .modal .download:hover {{ background: #C2185B; }}
 .modal .loading {{ color: var(--muted); font-style: italic; padding: 20px 0; }}
 .modal .error {{ color: var(--red); padding: 12px; background: #FFEBEE; border-radius: 6px; }}
+{cur_tab_css}
 </style>
 </head>
 <body>
@@ -1268,6 +1526,7 @@ function openDrill(td) {{
     }});
 }}
 
+{cur_tab_js}
 // MoM charts
 const MOM_LABELS   = {json.dumps(mom_classes)};
 const MOM_DATASETS = {json.dumps(mom_datasets)};

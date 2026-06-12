@@ -114,8 +114,29 @@ ORDER BY 1
 data_dir = Path(os.environ.get("DATA_DIR",
             str(Path(__file__).resolve().parent.parent / "data")))
 
+SQL_HOURLY = """
+SELECT
+  CONVERT_TIMEZONE('UTC', 'Asia/Kolkata', CALL_TIME)::DATE  AS call_date,
+  HOUR(CONVERT_TIMEZONE('UTC', 'Asia/Kolkata', CALL_TIME))  AS call_hour,
+  COUNT(*) AS call_count
+FROM PROD_DB.PUBLIC.AMEYO_CALL_DETAILS_REPORT
+WHERE CALL_TYPE = 'inbound.call.dial'
+  AND (
+    (CALL_TIME::DATE >= '2026-04-01' AND QUEUE_NAME = 'sales_queue')
+    OR
+    (CALL_TIME::DATE < '2026-04-01' AND QUEUE_NAME IN ('sales_queue', 'booking_queue'))
+  )
+  AND CONVERT_TIMEZONE('UTC', 'Asia/Kolkata', CALL_TIME)::DATE
+      >= DATEADD('day', -14, CURRENT_DATE)
+GROUP BY 1, 2
+ORDER BY 1, 2
+"""
+
 print("Pulling disposition counts (Sales & Status Queue)...")
 run_query(SQL_COUNTS, data_dir / "sales_daily.csv")
 
 print("Pulling daily metrics (Sales & Status Queue)...")
 run_query(SQL_METRICS, data_dir / "sales_metrics.csv")
+
+print("Pulling hourly data (Sales & Status Queue — last 14 days, IST)...")
+run_query(SQL_HOURLY, data_dir / "sales_hourly.csv")
