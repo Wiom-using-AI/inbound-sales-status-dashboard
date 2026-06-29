@@ -912,7 +912,9 @@ window.renderCurrent = function(dateStr) {{
     '<div class="spike-cards-row">'+cards+'</div></div>' : '';
 }}
 
-renderCurrent({today_js});
+// Use the dropdown's actual selected value — today may have no data yet
+// (e.g. pull ran at 04:30 before 8 AM), so fall back to latest date with data
+renderCurrent(document.getElementById('currDateSel').value);
 }})();
 </script>'''
 
