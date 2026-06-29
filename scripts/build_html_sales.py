@@ -737,22 +737,29 @@ function _curPct(t, a) {
 let curChartInst = null;
 
 function renderCurrent(selDate) {
-  const todayData = HOURLY_DATA[selDate] || new Array(24).fill(0);
-  const selIdx = _curDates.indexOf(selDate);
-  const prev7  = _curDates.slice(selIdx + 1, selIdx + 8);
+  const _H_START = 8;   // show from 08:00
+  const _H_END   = 22;  // show up to 21:59 (slot 21:00–22:00)
 
-  // 7-day average per hour
-  const avg7d = Array.from({length: 24}, (_, h) => {
+  const allToday = HOURLY_DATA[selDate] || new Array(24).fill(0);
+  const selIdx   = _curDates.indexOf(selDate);
+  const prev7    = _curDates.slice(selIdx + 1, selIdx + 8);
+
+  // 7-day average per hour (all 24h, sliced for display below)
+  const allAvg7d = Array.from({length: 24}, (_, h) => {
     if (prev7.length === 0) return 0;
     const vals = prev7.map(d => (HOURLY_DATA[d] || [])[h] || 0);
     return vals.reduce((a, b) => a + b, 0) / prev7.length;
   });
 
+  // Working-hours slice (H_START to H_END-1)
+  const todayData = allToday.slice(_H_START, _H_END);
+  const avg7d     = allAvg7d.slice(_H_START, _H_END);
+
   const totalToday = todayData.reduce((a, b) => a + b, 0);
   const totalAvg7d = avg7d.reduce((a, b) => a + b, 0);
   const vsAvgPct   = totalAvg7d > 0
     ? Math.round((totalToday - totalAvg7d) / totalAvg7d * 100) : 0;
-  const spikeSlots = todayData.filter((v, h) => _isCurSpiked(v, avg7d[h])).length;
+  const spikeSlots = todayData.filter((v, i) => _isCurSpiked(v, avg7d[i])).length;
 
   // Stat cards
   const upDir   = vsAvgPct > 0 ? '&#8593; ' : vsAvgPct < 0 ? '&#8595; ' : '';
@@ -769,12 +776,12 @@ function renderCurrent(selDate) {
       '<div class="v" style="' + (spikeSlots > 0 ? 'color:#C62828' : 'color:var(--pink)') + '">' +
       spikeSlots + '</div></div>';
 
-  // Chart
-  const hours     = Array.from({length: 24}, (_, i) => i + ':00');
-  const barColors = todayData.map((v, h) =>
-    _isCurSpiked(v, avg7d[h]) ? 'rgba(198,40,40,0.75)' : 'rgba(233,30,140,0.45)');
-  const barBorders = todayData.map((v, h) =>
-    _isCurSpiked(v, avg7d[h]) ? '#C62828' : '#E91E8C');
+  // Chart — working hours only
+  const hours      = Array.from({length: _H_END - _H_START}, (_, i) => (i + _H_START) + ':00');
+  const barColors  = todayData.map((v, i) =>
+    _isCurSpiked(v, avg7d[i]) ? 'rgba(198,40,40,0.75)' : 'rgba(233,30,140,0.45)');
+  const barBorders = todayData.map((v, i) =>
+    _isCurSpiked(v, avg7d[i]) ? '#C62828' : '#E91E8C');
 
   if (curChartInst) { curChartInst.destroy(); curChartInst = null; }
   const ctx = document.getElementById('curChart');
@@ -795,7 +802,7 @@ function renderCurrent(selDate) {
         {
           type: 'line',
           label: '7D Avg',
-          data: avg7d.map(v => Math.round(v * 10) / 10),
+          data: avg7d.map(v => Math.round(v)),
           borderColor: '#1E88E5',
           backgroundColor: 'rgba(30,136,229,0.1)',
           tension: 0.3,
@@ -812,7 +819,7 @@ function renderCurrent(selDate) {
       plugins: {
         title: {
           display: true,
-          text: 'Hourly Call Volume — ' + selDate + ' vs 7-Day Average',
+          text: 'Hourly Call Volume — ' + selDate + ' vs 7-Day Average (08:00–22:00)',
         },
         legend: { position: 'top' },
       },
@@ -823,7 +830,7 @@ function renderCurrent(selDate) {
     }
   });
 
-  // Table
+  // Table — working hours only
   const _mns = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   function _fmtD(d) {
     const p = d.split('-');
@@ -839,13 +846,14 @@ function renderCurrent(selDate) {
   prev7.forEach(d => { thtml += '<th style="' + _thStyle + 'min-width:65px">' + _fmtD(d) + '</th>'; });
   thtml += '</tr></thead><tbody>';
 
-  for (let h = 0; h < 24; h++) {
-    const t      = todayData[h];
-    const a      = avg7d[h];
+  for (let i = 0; i < todayData.length; i++) {
+    const h      = i + _H_START;
+    const t      = todayData[i];
+    const a      = avg7d[i];
     const spiked = _isCurSpiked(t, a);
     const pct    = _curPct(t, a);
 
-    // Sub-text shown inside the Today cell
+    // Sub-text inside Today cell
     let todaySub;
     if (spiked) {
       todaySub = '<span class="spike">&#9650; SPIKE +' + pct + '%</span>';
@@ -861,8 +869,7 @@ function renderCurrent(selDate) {
     thtml += '<tr>';
     thtml += '<td class="disp" style="text-align:center;padding-left:10px">'
            + h + ':00–' + (h+1) + ':00</td>';
-    thtml += '<td class="num mtd avgcol">'
-           + (a > 0 ? (Math.round(a * 10)/10).toFixed(1) : '0') + '</td>';
+    thtml += '<td class="num mtd avgcol">' + Math.round(a) + '</td>';
     thtml += '<td class="num" style="' + todayStyle + '">' + t + todaySub + '</td>';
     prev7.forEach(d => {
       const v = (HOURLY_DATA[d] || [])[h] || 0;
