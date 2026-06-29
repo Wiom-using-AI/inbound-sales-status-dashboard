@@ -121,6 +121,23 @@ ORDER BY 1, 2, 3, 4
 data_dir = Path(os.environ.get("DATA_DIR",
             str(Path(__file__).resolve().parent.parent / "data")))
 
+SQL_CSAT = """
+SELECT
+  TRY_TO_TIMESTAMP(CALL_DATE_AND_TIME, 'MM/DD/YY HH12:MI AM')::DATE AS call_date,
+  COUNT(*)                                                             AS total_surveyed,
+  SUM(CASE WHEN FEEDBACK_INPUT NOT IN ('No Input', 'Invalid Input')
+            AND FEEDBACK_INPUT IS NOT NULL
+            AND TRIM(FEEDBACK_INPUT) != ''
+       THEN 1 ELSE 0 END)                                             AS total_responded,
+  SUM(CASE WHEN FEEDBACK_INPUT IN ('4', '5') THEN 1 ELSE 0 END)      AS csat_satisfied
+FROM PROD_DB.PUBLIC.AMEYO_CSAT_REPORT_TABLE
+WHERE SOURCE_CAMPAIGN = 'customerSupportInbound'
+  AND QUEUE_NAME IN ('high_pain_queue', 'low_pain_queue')
+  AND TRY_TO_TIMESTAMP(CALL_DATE_AND_TIME, 'MM/DD/YY HH12:MI AM')::DATE >= '2026-02-01'
+GROUP BY 1
+ORDER BY 1
+"""
+
 print("Pulling disposition counts...")
 run_query(SQL_COUNTS, data_dir / "ameyo_daily.csv")
 
@@ -129,3 +146,6 @@ run_query(SQL_METRICS, data_dir / "ameyo_metrics.csv")
 
 print("Pulling hourly slot data (Current tab)...")
 run_query(SQL_HOURLY, data_dir / "ameyo_hourly.csv")
+
+print("Pulling CSAT data (Service Queue)...")
+run_query(SQL_CSAT, data_dir / "service_csat.csv")

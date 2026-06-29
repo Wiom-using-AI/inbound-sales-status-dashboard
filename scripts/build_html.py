@@ -32,6 +32,7 @@ _DATA = Path(_os.environ.get("DATA_DIR", str(_BASE / "data")))
 SRC         = _DATA / "ameyo_daily.csv"
 SRC_METRICS = _DATA / "ameyo_metrics.csv"
 SRC_HOURLY  = _DATA / "ameyo_hourly.csv"
+SRC_CSAT    = _DATA / "service_csat.csv"
 OUT_DIR = _BASE / "output" / "web"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 OUT = OUT_DIR / "index.html"
@@ -57,6 +58,17 @@ if SRC_METRICS.exists():
             "missed": int(mr["MISSED_CALLS"]),
             "aht":    float(mr["AVG_AHT_SEC"]),
             "agents": int(mr.get("AGENTS_LOGGED", 0)),
+        }
+
+# Load CSAT data: call_date -> {surveyed, responded, satisfied}
+csat_by_date = {}
+if SRC_CSAT.exists():
+    for cr in csv.DictReader(SRC_CSAT.open()):
+        d = date.fromisoformat(cr["CALL_DATE"])
+        csat_by_date[d] = {
+            "surveyed":  int(cr["TOTAL_SURVEYED"]),
+            "responded": int(cr["TOTAL_RESPONDED"]),
+            "satisfied": int(cr["CSAT_SATISFIED"]),
         }
 
 # Load hourly data:
@@ -349,6 +361,30 @@ def metrics_table(ym):
     cells.append(f'<td class="num prev avgcol">{fmt_pct(trans_pct_pavg)}</td>')
     for d in days_desc:
         cells.append(f'<td class="num">{fmt_pct(trans_pct_day.get(d, 0))}</td>')
+    rows_html.append(f'<tr class="row-class">{"".join(cells)}</tr>')
+
+    # Row 6: CSAT % = satisfied (score 4 or 5) / total numeric responses
+    def _csat_pct(d):
+        c = csat_by_date.get(d, {})
+        resp = c.get("responded", 0)
+        sat  = c.get("satisfied", 0)
+        return (sat / resp * 100) if resp else None
+
+    csat_pct_day  = {d: _csat_pct(d) for d in days_desc}
+    csat_pct_prev = {d: _csat_pct(d) for d in prev_days}
+
+    # MTD avg (complete days only — exclude today's partial data)
+    _csat_complete_vals = [v for d in complete_days if (v := _csat_pct(d)) is not None]
+    _csat_prev_vals     = [v for v in csat_pct_prev.values() if v is not None]
+    csat_pct_mtd  = avg(_csat_complete_vals) if _csat_complete_vals else None
+    csat_pct_pavg = avg(_csat_prev_vals)     if _csat_prev_vals     else None
+
+    cells = ['<td class="disp disp-class">CSAT %</td>']
+    cells.append(f'<td class="num mtd avgcol">{fmt_pct(csat_pct_mtd) if csat_pct_mtd is not None else "—"}</td>')
+    cells.append(f'<td class="num prev avgcol">{fmt_pct(csat_pct_pavg) if csat_pct_pavg is not None else "—"}</td>')
+    for d in days_desc:
+        v = csat_pct_day.get(d)
+        cells.append(f'<td class="num">{fmt_pct(v) if v is not None else "—"}</td>')
     rows_html.append(f'<tr class="row-class">{"".join(cells)}</tr>')
 
     return f'<table class="dash metrics-dash"><thead>{thead}</thead><tbody>{"".join(rows_html)}</tbody></table>'
