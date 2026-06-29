@@ -319,18 +319,18 @@ def metrics_table(ym):
         cells.append(f'<td class="num">{agents_day.get(d, 0)}</td>')
     rows_html.append(f'<tr class="row-class">{"".join(cells)}</tr>')
 
-    # Row 5: Transferred % (to AQ) — calls with cls = "user.transferred.to.campaign"
+    # Row 5: Transferred % (to AQ) — calls with disposition code = "user.transferred.to.aq"
     trans_day  = {}
     trans_prev = {}
     for d in days_desc:
         trans_day[d] = sum(
-            dd.get(d, 0) for (cls, _c), dd in counts.items()
-            if cls == "user.transferred.to.campaign"
+            dd.get(d, 0) for (_cls, code), dd in counts.items()
+            if code == "user.transferred.to.aq"
         )
     for d in prev_days:
         trans_prev[d] = sum(
-            dd.get(d, 0) for (cls, _c), dd in counts.items()
-            if cls == "user.transferred.to.campaign"
+            dd.get(d, 0) for (_cls, code), dd in counts.items()
+            if code == "user.transferred.to.aq"
         )
     trans_complete = {d: trans_day[d] for d in complete_days}
 
