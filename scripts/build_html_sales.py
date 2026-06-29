@@ -22,7 +22,7 @@ import csv
 import html
 import json
 from collections import defaultdict
-from datetime import date, datetime
+from datetime import date, datetime, timezone, timedelta as _td
 from pathlib import Path
 
 import os as _os
@@ -51,13 +51,28 @@ if SRC_METRICS.exists():
             "queue_wait": float(mr.get("AVG_QUEUE_WAIT_SEC") or 0),
         }
 
-# Load hourly data (IST) for Current tab — {date: {hour: count}}
-hourly_by_date = defaultdict(lambda: defaultdict(int))
+# Normalise legacy label
+def _norm(v: str) -> str:
+    return "Missed" if v == "(Unclassified)" else v
+
+# Load hourly data for Current tab
+#   hourly_raw[date][hour][cls]        = total count
+#   hourly_detail[date][hour][cls][code] = count per sub-code
+_IST = timezone(_td(hours=5, minutes=30))
+_NOW_IST = datetime.now(_IST)
+
+hourly_raw    = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
+hourly_detail = defaultdict(lambda: defaultdict(
+                    lambda: defaultdict(lambda: defaultdict(int))))
 if SRC_HOURLY.exists():
-    for hr in csv.DictReader(SRC_HOURLY.open()):
-        hd = date.fromisoformat(hr["CALL_DATE"])
-        hh = int(hr["CALL_HOUR"])
-        hourly_by_date[hd][hh] = int(hr["CALL_COUNT"])
+    for _hr in csv.DictReader(SRC_HOURLY.open()):
+        _hd  = date.fromisoformat(_hr["CALL_DATE"])
+        _hh  = int(_hr["CALL_HOUR"])
+        _cl  = _norm(_hr.get("DISPOSITION_CLASS", "Missed"))
+        _co  = _norm(_hr.get("DISPOSITION_CODE",  "Missed"))
+        _cnt = int(_hr["CALL_COUNT"])
+        hourly_raw[_hd][_hh][_cl]         += _cnt
+        hourly_detail[_hd][_hh][_cl][_co] += _cnt
 
 CLASS_MERGE_EXACT = {
     "Sales-App Issues":                 "Sales Queue",
@@ -81,9 +96,29 @@ def display_class(src_cls: str, d: date = None) -> str:
         if (src_cls.startswith("Sales/") or src_cls.startswith("Sale_")
                 or src_cls.startswith("Sale/")):
             return "Sales Queue"
-    if src_cls == "(Unclassified)" or src_cls == "" or src_cls is None:
+    if src_cls in ("(Unclassified)", "Missed", "") or src_cls is None:
         return "Missed Calls"
     return src_cls
+
+# Re-normalize hourly_raw and hourly_detail using display_class()
+# so that "Sales-App Issues", "Sales/Status-Pause", etc. all roll up to
+# "Sales Queue" in the Current-tab Spike Remarks breakdown.
+_new_raw    = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
+_new_detail = defaultdict(lambda: defaultdict(
+                    lambda: defaultdict(lambda: defaultdict(int))))
+for _hd2, _hrs2 in list(hourly_raw.items()):
+    for _hh2, _cls_cnt in list(_hrs2.items()):
+        for _cl_raw, _cnt2 in list(_cls_cnt.items()):
+            _cl2 = display_class(_cl_raw, _hd2)
+            _new_raw[_hd2][_hh2][_cl2] += _cnt2
+for _hd2, _hrs2 in list(hourly_detail.items()):
+    for _hh2, _cls_map in list(_hrs2.items()):
+        for _cl_raw, _code_map in list(_cls_map.items()):
+            _cl2 = display_class(_cl_raw, _hd2)
+            for _co2, _cnt2 in list(_code_map.items()):
+                _new_detail[_hd2][_hh2][_cl2][_co2] += _cnt2
+hourly_raw    = _new_raw
+hourly_detail = _new_detail
 
 COLLAPSED_CLASSES  = {"Missed Calls",
                       "PayG - Clarification Provided",
@@ -664,12 +699,28 @@ top10_table = f'<table class="dash"><thead>{top10_head}</thead><tbody>{"".join(t
 
 # ---------------------------------------------------------------- Current tab
 
-# Build hourly JSON: {dateStr: [count_h0 .. count_h23]}
-hourly_data_json = {}
-for _hd in sorted(hourly_by_date.keys()):
-    hourly_data_json[_hd.isoformat()] = [hourly_by_date[_hd].get(h, 0) for h in range(24)]
+TODAY = _NOW_IST.date()  # use IST date so data/display stays in sync
 
-# CSS for Current tab stat cards (plain string — no f-string escaping needed)
+# Build PAYLOAD for Current tab:
+# {dateStr: {hourStr: {"t": count, "d": {cls: {code: count}}} | null}}
+_cutoff = TODAY - _td(days=8)
+curr_dates_list = sorted([d for d in hourly_raw if d > _cutoff], reverse=True)
+
+payload = {}
+for _d in curr_dates_list:
+    day_data = {}
+    for h in range(24):
+        if h not in hourly_raw[_d]:
+            day_data[str(h)] = None if _d == TODAY else {"t": 0, "d": {}}
+        else:
+            _total = sum(hourly_raw[_d][h].values())
+            _detail = {cls: dict(codes) for cls, codes in hourly_detail[_d][h].items()}
+            day_data[str(h)] = {"t": _total, "d": _detail}
+    payload[_d.isoformat()] = day_data
+
+PAYLOAD_JSON = json.dumps(payload)
+
+# CSS for Current tab (plain string — no f-string escaping needed)
 cur_tab_css = """
 /* ---- Current tab ---- */
 .cur-stat-card { background: #fff; padding: 12px 20px; border-radius: 10px;
@@ -680,44 +731,53 @@ cur_tab_css = """
 .cur-stat-card .k { color: var(--muted); font-size: 10px; text-transform: uppercase;
   letter-spacing: .6px; margin-bottom: 2px; }
 .cur-stat-card .v { font-weight: 700; font-size: 22px; color: var(--pink); }
+/* curr-table: no sticky header (inside scrollable div) */
+.curr-table thead th { position: static; top: auto; z-index: auto; }
+.curr-table td:first-child, .curr-table th:first-child { position: static; z-index: auto; box-shadow: none; }
+/* ---- Spike Remarks ---- */
+.spike-remarks { background: #FFF8E1; border: 1px solid #FFE082;
+  border-radius: 8px; padding: 12px 16px; margin-top: 16px; }
+.spike-remarks-title { font-weight: 700; font-size: 12px; color: #E65100; margin-bottom: 10px; }
+.srk-row { display: flex; align-items: flex-start; gap: 12px; padding: 7px 0;
+  border-bottom: 1px solid #FFE082; flex-wrap: wrap; }
+.srk-row:last-child { border-bottom: none; }
+.srk-hour { font-weight: 700; font-size: 12px; min-width: 120px; color: #333; }
+.srk-badge { font-size: 11px; font-weight: 700; border-radius: 10px;
+  padding: 2px 10px; white-space: nowrap; }
+.srk-red { background: #FFEBEE; color: #C62828; }
+.srk-detail { flex: 1; display: flex; flex-wrap: wrap; gap: 8px; }
+.srk-cls { background: #fff; border: 1px solid #FFE082; border-radius: 6px;
+  padding: 4px 10px; font-size: 11.5px; }
+.srk-cls-name { font-weight: 600; color: #E91E8C; }
+.srk-cls-cnt { color: var(--text); font-weight: 700; margin-left: 4px; }
+.srk-code { padding-left: 12px; margin-top: 2px; font-size: 10.5px; color: var(--muted); }
+.srk-code-cnt { font-weight: 600; color: var(--text); margin-left: 4px; }
 """
 
 # JS for Current tab (plain string — curly braces don't need escaping here)
 cur_tab_js = (
-    "// ---- Current Tab ----\n"
-    "const HOURLY_DATA = " + json.dumps(hourly_data_json) + ";\n"
+    "// ---- Current Tab (Sales & Status Queue) ----\n"
+    "const PAYLOAD = " + PAYLOAD_JSON + ";\n"
     + """
-const _curDates = Object.keys(HOURLY_DATA).sort().reverse();
+const _curDates = Object.keys(PAYLOAD).sort().reverse();
+const H_START = 8, H_END = 22;
 
 (function() {
-  const sel = document.getElementById('curDateSel');
+  var sel = document.getElementById('currDateSel');
   if (!sel) return;
-  const _months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  _curDates.forEach(d => {
-    const opt = document.createElement('option');
+  var _mns = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  _curDates.forEach(function(d) {
+    var opt = document.createElement('option');
     opt.value = d;
-    const p = d.split('-');
-    opt.textContent = p[2] + '-' + _months[parseInt(p[1])-1];
+    var p = d.split('-');
+    opt.textContent = parseInt(p[2]) + '-' + _mns[parseInt(p[1])-1];
     sel.appendChild(opt);
   });
-  sel.addEventListener('change', () => renderCurrent(sel.value));
-  // If Current tab is already the active tab on page load, render immediately
-  const panel = document.getElementById('tab-current');
-  if (panel && panel.classList.contains('active') && _curDates.length > 0) {
-    setTimeout(() => renderCurrent(_curDates[0]), 100);
-  }
-})();
-
-// Re-render whenever the user clicks the Current tab button
-const _curBtn = document.querySelector('.tab-btn[data-target="tab-current"]');
-if (_curBtn) {
-  _curBtn.addEventListener('click', () => {
-    setTimeout(() => {
-      const sel = document.getElementById('curDateSel');
-      if (sel && sel.value) renderCurrent(sel.value);
-    }, 60);
+  if (_curDates.length > 0) sel.value = _curDates[0];
+  sel.addEventListener('change', function() {
+    if (window.renderCurrent) window.renderCurrent(sel.value);
   });
-}
+})();
 
 function _spikeThreshH(v) {
   if (v >= 100) return 0.15;
@@ -725,8 +785,8 @@ function _spikeThreshH(v) {
   return 1.00;
 }
 function _isCurSpiked(t, a) {
-  if (!a || a <= 0 || t <= 0) return false;
-  const pct = (t - a) / a;
+  if (t === null || t === undefined || !a || a <= 0 || t <= 0) return false;
+  var pct = (t - a) / a;
   return pct > 0 && pct >= _spikeThreshH(t);
 }
 function _curPct(t, a) {
@@ -734,93 +794,98 @@ function _curPct(t, a) {
   return Math.round((t - a) / a * 100);
 }
 
-let curChartInst = null;
+var curChartInst = null;
 
-function renderCurrent(selDate) {
-  const _H_START = 8;   // show from 08:00
-  const _H_END   = 22;  // show up to 21:59 (slot 21:00–22:00)
+window.renderCurrent = function(dateStr) {
+  if (!dateStr || !PAYLOAD[dateStr]) {
+    if (_curDates.length > 0) dateStr = _curDates[0];
+    else return;
+  }
+  var sel = document.getElementById('currDateSel');
+  if (sel && sel.value !== dateStr) sel.value = dateStr;
 
-  const allToday = HOURLY_DATA[selDate] || new Array(24).fill(0);
-  const selIdx   = _curDates.indexOf(selDate);
-  const prev7    = _curDates.slice(selIdx + 1, selIdx + 8);
+  var selIdx = _curDates.indexOf(dateStr);
+  var past = _curDates.slice(selIdx + 1, selIdx + 8);
+  var dayHours = PAYLOAD[dateStr];
 
-  // 7-day average per hour (all 24h, sliced for display below)
-  const allAvg7d = Array.from({length: 24}, (_, h) => {
-    if (prev7.length === 0) return 0;
-    const vals = prev7.map(d => (HOURLY_DATA[d] || [])[h] || 0);
-    return vals.reduce((a, b) => a + b, 0) / prev7.length;
+  // Working hours array
+  var wkHours = [];
+  for (var _wi = H_START; _wi < H_END; _wi++) wkHours.push(_wi);
+
+  // 7-day avg per working hour
+  var avg7d = wkHours.map(function(h) {
+    if (past.length === 0) return 0;
+    var vals = past.map(function(d) {
+      var hd = (PAYLOAD[d] || {})[String(h)];
+      return (hd && hd.t !== null && hd.t !== undefined) ? hd.t : 0;
+    });
+    return vals.reduce(function(a, b) { return a + b; }, 0) / past.length;
   });
 
-  // Working-hours slice (H_START to H_END-1)
-  const todayData = allToday.slice(_H_START, _H_END);
-  const avg7d     = allAvg7d.slice(_H_START, _H_END);
+  // Today's values (null = future hour)
+  var todayVals = wkHours.map(function(h) {
+    var hd = dayHours[String(h)];
+    if (hd === null || hd === undefined) return null;
+    return (hd.t !== undefined) ? hd.t : 0;
+  });
 
-  const totalToday = todayData.reduce((a, b) => a + b, 0);
-  const totalAvg7d = avg7d.reduce((a, b) => a + b, 0);
-  const vsAvgPct   = totalAvg7d > 0
-    ? Math.round((totalToday - totalAvg7d) / totalAvg7d * 100) : 0;
-  const spikeSlots = todayData.filter((v, i) => _isCurSpiked(v, avg7d[i])).length;
+  // Banner stats (sum non-null hours only)
+  var totToday = 0, totAvg = 0;
+  todayVals.forEach(function(v, i) {
+    if (v !== null && v !== undefined) { totToday += v; totAvg += avg7d[i]; }
+  });
+  var vsAvgPct = totAvg > 0 ? Math.round((totToday - totAvg) / totAvg * 100) : 0;
+  var spikeSlots = todayVals.filter(function(v, i) { return _isCurSpiked(v, avg7d[i]); }).length;
 
-  // Stat cards
-  const upDir   = vsAvgPct > 0 ? '&#8593; ' : vsAvgPct < 0 ? '&#8595; ' : '';
-  const vsStyle = vsAvgPct > 0 ? 'color:#C62828'
-                : vsAvgPct < 0 ? 'color:#2E7D32' : 'color:#333';
+  var upDir   = vsAvgPct > 0 ? '&#8593; ' : vsAvgPct < 0 ? '&#8595; ' : '';
+  var vsStyle = vsAvgPct > 0 ? 'color:#C62828' : vsAvgPct < 0 ? 'color:#2E7D32' : 'color:#333';
   document.getElementById('curStats').innerHTML =
-    '<div class="cur-stat-card"><div class="k">Calls (Today)</div>' +
-      '<div class="v">' + fmtNum(totalToday) + '</div></div>' +
+    '<div class="cur-stat-card"><div class="k">Calls Today</div>' +
+      '<div class="v">' + fmtNum(totToday) + '</div></div>' +
     '<div class="cur-stat-card"><div class="k">7D Avg (same slots)</div>' +
-      '<div class="v">' + fmtNum(Math.round(totalAvg7d)) + '</div></div>' +
+      '<div class="v">' + fmtNum(Math.round(totAvg)) + '</div></div>' +
     '<div class="cur-stat-card"><div class="k">vs 7D Avg</div>' +
       '<div class="v" style="' + vsStyle + '">' + upDir + Math.abs(vsAvgPct) + '%</div></div>' +
     '<div class="cur-stat-card"><div class="k">Spike Slots</div>' +
       '<div class="v" style="' + (spikeSlots > 0 ? 'color:#C62828' : 'color:var(--pink)') + '">' +
       spikeSlots + '</div></div>';
 
-  // Chart — working hours only
-  const hours      = Array.from({length: _H_END - _H_START}, (_, i) => (i + _H_START) + ':00');
-  const barColors  = todayData.map((v, i) =>
-    _isCurSpiked(v, avg7d[i]) ? 'rgba(198,40,40,0.75)' : 'rgba(233,30,140,0.45)');
-  const barBorders = todayData.map((v, i) =>
-    _isCurSpiked(v, avg7d[i]) ? '#C62828' : '#E91E8C');
+  // Chart
+  var hourLabels = wkHours.map(function(h) { return h + ':00'; });
+  var barData    = todayVals.map(function(v) { return v === null ? null : v; });
+  var barColors  = todayVals.map(function(v, i) {
+    return _isCurSpiked(v, avg7d[i]) ? 'rgba(198,40,40,0.75)' : 'rgba(233,30,140,0.45)';
+  });
+  var barBorders = todayVals.map(function(v, i) {
+    return _isCurSpiked(v, avg7d[i]) ? '#C62828' : '#E91E8C';
+  });
 
   if (curChartInst) { curChartInst.destroy(); curChartInst = null; }
-  const ctx = document.getElementById('curChart');
+  var ctx = document.getElementById('curChart');
   if (!ctx) return;
   curChartInst = new Chart(ctx.getContext('2d'), {
     data: {
-      labels: hours,
+      labels: hourLabels,
       datasets: [
         {
-          type: 'bar',
-          label: 'Today (' + selDate.slice(5) + ')',
-          data: todayData,
-          backgroundColor: barColors,
-          borderColor: barBorders,
-          borderWidth: 1,
-          order: 2,
+          type: 'bar', label: 'Today (' + dateStr.slice(5) + ')',
+          data: barData, backgroundColor: barColors, borderColor: barBorders,
+          borderWidth: 1, order: 2,
         },
         {
-          type: 'line',
-          label: '7D Avg',
-          data: avg7d.map(v => Math.round(v)),
-          borderColor: '#1E88E5',
-          backgroundColor: 'rgba(30,136,229,0.1)',
-          tension: 0.3,
-          borderWidth: 2,
-          pointRadius: 3,
-          fill: false,
-          order: 1,
+          type: 'line', label: '7D Avg',
+          data: avg7d.map(function(v) { return Math.round(v * 10) / 10; }),
+          borderColor: '#1E88E5', backgroundColor: 'rgba(30,136,229,0.1)',
+          tension: 0.3, borderWidth: 2, pointRadius: 3, fill: false, order: 1,
         }
       ]
     },
     options: {
-      responsive: true,
-      maintainAspectRatio: false,
+      responsive: true, maintainAspectRatio: false,
+      devicePixelRatio: window.devicePixelRatio || 2,
       plugins: {
-        title: {
-          display: true,
-          text: 'Hourly Call Volume — ' + selDate + ' vs 7-Day Average (08:00–22:00)',
-        },
+        title: { display: true,
+          text: 'Hourly Call Volume — ' + dateStr + ' vs 7-Day Average (08:00–22:00)' },
         legend: { position: 'top' },
       },
       scales: {
@@ -830,61 +895,140 @@ function renderCurrent(selDate) {
     }
   });
 
-  // Table — working hours only
-  const _mns = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  // Hourly table
+  var _mns2 = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   function _fmtD(d) {
-    const p = d.split('-');
-    return p[2] + '-' + _mns[parseInt(p[1])-1];
+    var p = d.split('-');
+    return parseInt(p[2]) + '-' + _mns2[parseInt(p[1])-1];
   }
-
-  const _thStyle = 'position:static;top:auto;';
-  let thtml = '<div style="overflow-x:auto;margin-top:16px">'
-    + '<table class="dash" style="min-width:560px"><thead><tr>';
-  thtml += '<th style="' + _thStyle + 'min-width:110px">Hour (IST)</th>';
-  thtml += '<th style="' + _thStyle + 'min-width:80px">7D Avg</th>';
-  thtml += '<th style="' + _thStyle + 'min-width:100px">Today</th>';
-  prev7.forEach(d => { thtml += '<th style="' + _thStyle + 'min-width:65px">' + _fmtD(d) + '</th>'; });
+  var _thSt = 'position:static;top:auto;';
+  var thtml = '<div style="overflow-x:auto;margin-top:16px">'
+    + '<table class="dash curr-table" style="min-width:560px"><thead><tr>'
+    + '<th style="' + _thSt + 'min-width:110px">Hour (IST)</th>'
+    + '<th style="' + _thSt + 'min-width:80px">7D Avg</th>'
+    + '<th style="' + _thSt + 'min-width:100px">Today</th>';
+  past.forEach(function(d) {
+    thtml += '<th style="' + _thSt + 'min-width:65px">' + _fmtD(d) + '</th>';
+  });
   thtml += '</tr></thead><tbody>';
 
-  for (let i = 0; i < todayData.length; i++) {
-    const h      = i + _H_START;
-    const t      = todayData[i];
-    const a      = avg7d[i];
-    const spiked = _isCurSpiked(t, a);
-    const pct    = _curPct(t, a);
+  var totAvgSum = 0, totTodaySum = 0, todayHasData = false;
+  var totPast = {};
+  past.forEach(function(d) { totPast[d] = 0; });
 
-    // Sub-text inside Today cell
-    let todaySub;
-    if (spiked) {
+  for (var i = 0; i < wkHours.length; i++) {
+    var h   = wkHours[i];
+    var tv  = todayVals[i];
+    var av  = avg7d[i] || 0;
+    var spiked = _isCurSpiked(tv, av);
+    var pct    = _curPct(tv, av);
+
+    if (tv !== null && tv !== undefined) {
+      totTodaySum += tv; totAvgSum += av; todayHasData = true;
+    }
+    past.forEach(function(d) {
+      var hd = (PAYLOAD[d] || {})[String(h)];
+      var v  = (hd && hd.t !== null && hd.t !== undefined) ? hd.t : 0;
+      totPast[d] = (totPast[d] || 0) + v;
+    });
+
+    var todaySub = '';
+    if (tv === null || tv === undefined) {
+      todaySub = '<span style="color:#999;font-size:9px;display:block">—</span>';
+    } else if (spiked) {
       todaySub = '<span class="spike">&#9650; SPIKE +' + pct + '%</span>';
-    } else if (a > 0) {
-      if      (pct > 0) todaySub = '<span style="color:#C62828;font-weight:600;font-size:9px;display:block">+'
-                                    + pct + '% &#8593;</span>';
-      else if (pct < 0) todaySub = '<span style="color:#2E7D32;font-size:9px;display:block">'
-                                    + pct + '%</span>';
-      else              todaySub = '';
-    } else { todaySub = ''; }
-
-    const todayStyle = spiked ? 'background:#FFEBEE;font-weight:700' : '';
+    } else if (av > 0) {
+      if (pct > 0) todaySub = '<span style="color:#C62828;font-weight:600;font-size:9px;display:block">+' + pct + '% &#8593;</span>';
+      else if (pct < 0) todaySub = '<span style="color:#2E7D32;font-size:9px;display:block">' + pct + '%</span>';
+    }
+    var todayDisp  = (tv === null || tv === undefined) ? '' : String(tv);
+    var todayStyle = spiked ? 'background:#FFEBEE;font-weight:700' : '';
     thtml += '<tr>';
     thtml += '<td class="disp" style="text-align:center;padding-left:10px">'
-           + h + ':00–' + (h+1) + ':00</td>';
-    thtml += '<td class="num mtd avgcol">' + Math.round(a) + '</td>';
-    thtml += '<td class="num" style="' + todayStyle + '">' + t + todaySub + '</td>';
-    prev7.forEach(d => {
-      const v = (HOURLY_DATA[d] || [])[h] || 0;
+           + h + ':00–' + (h + 1) + ':00</td>';
+    thtml += '<td class="num mtd avgcol">' + Math.round(av) + '</td>';
+    thtml += '<td class="num" style="' + todayStyle + '">' + todayDisp + todaySub + '</td>';
+    past.forEach(function(d) {
+      var hd = (PAYLOAD[d] || {})[String(h)];
+      var v  = (hd && hd.t !== null && hd.t !== undefined) ? hd.t : 0;
       thtml += '<td class="num">' + v + '</td>';
     });
     thtml += '</tr>';
   }
-  thtml += '</tbody></table></div>';
+  // Total row
+  thtml += '<tr class="row-total"><td class="disp total-label" style="text-align:center">TOTAL</td>';
+  thtml += '<td class="num avgcol">' + Math.round(totAvgSum) + '</td>';
+  thtml += '<td class="num">' + (todayHasData ? totTodaySum : '') + '</td>';
+  past.forEach(function(d) { thtml += '<td class="num">' + (totPast[d] || 0) + '</td>'; });
+  thtml += '</tr></tbody></table></div>';
   document.getElementById('curTable').innerHTML = thtml;
-}
+
+  // Spike Remarks
+  var spikeRows = [];
+  for (var i2 = 0; i2 < wkHours.length; i2++) {
+    var h2  = wkHours[i2];
+    var tv2 = todayVals[i2];
+    var av2 = avg7d[i2] || 0;
+    if (!_isCurSpiked(tv2, av2)) continue;
+    var pct2    = _curPct(tv2, av2);
+    var hd2     = dayHours[String(h2)];
+    var detail2 = (hd2 && hd2.d) ? hd2.d : {};
+
+    function _esc(s) {
+      return String(s).replace(/[<>&"]/g, function(c) {
+        return {'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c];
+      });
+    }
+
+    var clsEntries = Object.keys(detail2).map(function(cls) {
+      var codes = detail2[cls];
+      var tot = Object.keys(codes).reduce(function(s, k) { return s + codes[k]; }, 0);
+      return { cls: cls, tot: tot, codes: codes };
+    }).filter(function(e) { return e.tot > 0; })
+      .sort(function(a, b) { return b.tot - a.tot; });
+
+    var clsHtml = '';
+    clsEntries.forEach(function(e) {
+      clsHtml += '<div class="srk-cls"><span class="srk-cls-name">' + _esc(e.cls)
+               + '</span><span class="srk-cls-cnt"> ' + e.tot + '</span>';
+      var codeArr = Object.keys(e.codes).map(function(c) {
+        return { code: c, cnt: e.codes[c] };
+      }).filter(function(x) { return x.cnt > 0; })
+        .sort(function(a, b) { return b.cnt - a.cnt; });
+      if (codeArr.length > 1) {
+        codeArr.forEach(function(x) {
+          clsHtml += '<div class="srk-code"><span class="srk-code-name">' + _esc(x.code)
+                   + '</span><span class="srk-code-cnt"> ' + x.cnt + '</span></div>';
+        });
+      }
+      clsHtml += '</div>';
+    });
+
+    spikeRows.push(
+      '<div class="srk-row">'
+      + '<div class="srk-hour">' + h2 + ':00–' + (h2 + 1) + ':00</div>'
+      + '<div class="srk-badge srk-red">&#9650; +' + pct2 + '%</div>'
+      + '<div class="srk-detail">'
+      + (clsHtml || '<em style="color:#999">no breakdown available</em>')
+      + '</div></div>'
+    );
+  }
+
+  var spikeEl = document.getElementById('curSpike');
+  if (spikeEl) {
+    if (spikeRows.length === 0) {
+      spikeEl.innerHTML = '<div style="color:#666;font-size:12px;padding:8px 0">'
+        + 'No spike hours detected for ' + dateStr + '.</div>';
+    } else {
+      spikeEl.innerHTML = spikeRows.join('');
+    }
+  }
+};
 """
 )
 
 # Current tab panel HTML
-if not hourly_data_json:
+if not payload:
     cur_tab_panel = (
         '<section id="tab-current" class="tab-panel">'
         '<div style="padding:60px 32px;text-align:center;color:#666;font-size:13px">'
@@ -896,7 +1040,7 @@ else:
         '<section id="tab-current" class="tab-panel">'
         '<div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:16px">'
           '<label style="font-weight:600;font-size:13px">View Date:&nbsp;'
-            '<select id="curDateSel" style="padding:6px 12px;border:1px solid #D0D0D0;'
+            '<select id="currDateSel" style="padding:6px 12px;border:1px solid #D0D0D0;'
             'border-radius:6px;font-size:13px;cursor:pointer"></select>'
           '</label>'
           '<span style="color:#666;font-size:11.5px">Hourly breakdown vs 7-day average (IST)</span>'
@@ -906,6 +1050,11 @@ else:
           '<canvas id="curChart"></canvas>'
         '</div>'
         '<div id="curTable"></div>'
+        '<div class="spike-remarks">'
+          '<div class="spike-remarks-title">&#9650; Spike Remarks &mdash; Disposition Breakdown</div>'
+          '<div id="curSpike"><div style="color:#666;font-size:12px;padding:8px 0">'
+          'Select a date to view spike details.</div></div>'
+        '</div>'
         '<div class="legend" style="margin-top:12px">'
           '<span class="pill">&#x26A0; Spike Basis</span>'
           ' value <b>&ge;&thinsp;100 &rarr; +15%</b> &middot;'
@@ -1388,6 +1537,10 @@ function activate(id) {{
     el.classList.toggle('active', el.dataset.tab === id);
   }});
   if (id === 'tab-mom') renderChart();
+  if (id === 'tab-current' && window.renderCurrent) {{
+    var _csel = document.getElementById('currDateSel');
+    if (_csel && _csel.value) window.renderCurrent(_csel.value);
+  }}
 }}
 buttons.forEach(b => b.addEventListener('click', () => activate(b.dataset.target)));
 const saved = (function(){{ try {{ return localStorage.getItem('wiom.dash.tab'); }} catch(e) {{ return null; }} }})();

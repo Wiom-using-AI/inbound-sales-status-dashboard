@@ -61,8 +61,8 @@ SQL_COUNTS = """
 WITH base AS (
   SELECT
     CALL_TIME::DATE                                                  AS call_date,
-    COALESCE(NULLIF(TRIM(DISPOSITION_CLASS), ''), '(Unclassified)') AS disposition_class,
-    COALESCE(NULLIF(TRIM(DISPOSITION_CODE),  ''), '(Unclassified)') AS disposition_code
+    COALESCE(NULLIF(TRIM(DISPOSITION_CLASS), ''), 'Missed') AS disposition_class,
+    COALESCE(NULLIF(TRIM(DISPOSITION_CODE),  ''), 'Missed') AS disposition_code
   FROM PROD_DB.PUBLIC.AMEYO_CALL_DETAILS_REPORT
   WHERE CALL_TYPE = 'inbound.call.dial'
     AND (
@@ -83,7 +83,7 @@ SQL_METRICS = """
 WITH base AS (
   SELECT
     CALL_TIME::DATE                                                  AS call_date,
-    COALESCE(NULLIF(TRIM(DISPOSITION_CLASS), ''), '(Unclassified)') AS disposition_class,
+    COALESCE(NULLIF(TRIM(DISPOSITION_CLASS), ''), 'Missed') AS disposition_class,
     DATEDIFF('second', '00:00:00'::TIME, TRY_TO_TIME(USER_TALK_TIME))  AS talk_sec,
     DATEDIFF('second', '00:00:00'::TIME, TRY_TO_TIME(ACW_DURATION))    AS acw_sec,
     DATEDIFF('second', '00:00:00'::TIME, TRY_TO_TIME(IVR_TIME))        AS queue_wait_sec,
@@ -99,8 +99,8 @@ WITH base AS (
 SELECT
   call_date,
   COUNT(*)                                             AS total_calls,
-  SUM(CASE WHEN disposition_class = '(Unclassified)' THEN 1 ELSE 0 END)  AS missed_calls,
-  AVG(CASE WHEN disposition_class != '(Unclassified)'
+  SUM(CASE WHEN disposition_class = 'Missed' THEN 1 ELSE 0 END)  AS missed_calls,
+  AVG(CASE WHEN disposition_class != 'Missed'
       THEN COALESCE(talk_sec, 0) + COALESCE(acw_sec, 0)
       END)                                             AS avg_aht_sec,
   COUNT(DISTINCT USER_ID)                              AS agents_logged,
@@ -116,9 +116,11 @@ data_dir = Path(os.environ.get("DATA_DIR",
 
 SQL_HOURLY = """
 SELECT
-  CALL_TIME::DATE  AS call_date,
-  HOUR(CALL_TIME)  AS call_hour,
-  COUNT(*)         AS call_count
+    CALL_TIME::DATE                                                   AS call_date,
+    HOUR(CALL_TIME)                                                   AS call_hour,
+    COALESCE(NULLIF(TRIM(DISPOSITION_CLASS), ''), 'Missed')          AS disposition_class,
+    COALESCE(NULLIF(TRIM(DISPOSITION_CODE),  ''), 'Missed')          AS disposition_code,
+    COUNT(*)                                                          AS call_count
 FROM PROD_DB.PUBLIC.AMEYO_CALL_DETAILS_REPORT
 WHERE CALL_TYPE = 'inbound.call.dial'
   AND (
@@ -126,9 +128,9 @@ WHERE CALL_TYPE = 'inbound.call.dial'
     OR
     (CALL_TIME::DATE < '2026-04-01' AND QUEUE_NAME IN ('sales_queue', 'booking_queue'))
   )
-  AND CALL_TIME::DATE >= DATEADD('day', -14, CURRENT_DATE)
-GROUP BY 1, 2
-ORDER BY 1, 2
+  AND CALL_TIME::DATE >= DATEADD('day', -8, CURRENT_DATE())
+GROUP BY 1, 2, 3, 4
+ORDER BY 1, 2, 3, 4
 """
 
 print("Pulling disposition counts (Sales & Status Queue)...")
@@ -137,5 +139,5 @@ run_query(SQL_COUNTS, data_dir / "sales_daily.csv")
 print("Pulling daily metrics (Sales & Status Queue)...")
 run_query(SQL_METRICS, data_dir / "sales_metrics.csv")
 
-print("Pulling hourly data (Sales & Status Queue — last 14 days, IST)...")
+print("Pulling hourly data (Sales & Status Queue — last 8 days)...")
 run_query(SQL_HOURLY, data_dir / "sales_hourly.csv")
