@@ -158,7 +158,7 @@ for r in rows:
         key_code = src_cls  # e.g. "Sales-App Issues", "Sale_Booking Process…"
         # Also track the disposition code as level-3
         l3_code = (r.get("DISPOSITION_CODE") or "").strip()
-        if l3_code and l3_code != "(Unclassified)":
+        if l3_code and l3_code not in ("(Unclassified)", "Missed"):
             counts_l3[(cls, src_cls, l3_code)][d] += int(r["CALL_COUNT"])
     elif cls in COLLAPSED_CLASSES:
         key_code = COLLAPSED_SENTINEL
