@@ -912,9 +912,8 @@ window.renderCurrent = function(dateStr) {{
     '<div class="spike-cards-row">'+cards+'</div></div>' : '';
 }}
 
-// Use the dropdown's actual selected value — today may have no data yet
-// (e.g. pull ran at 04:30 before 8 AM), so fall back to latest date with data
-renderCurrent(document.getElementById('currDateSel').value);
+// Initial render is triggered by activate() once the tab is visible,
+// so the Chart.js canvas has proper dimensions. See activate() below.
 }})();
 </script>'''
 
@@ -1542,6 +1541,11 @@ function activate(id) {{
     el.classList.toggle('active', el.dataset.tab === id);
   }});
   if (id === 'tab-mom') renderChart();
+  // Render current tab chart only when tab is visible (canvas needs real dimensions)
+  if (id === 'tab-current' && window.renderCurrent) {{
+    var sel = document.getElementById('currDateSel');
+    if (sel) window.renderCurrent(sel.value);
+  }}
 }}
 buttons.forEach(b => b.addEventListener('click', () => activate(b.dataset.target)));
 const saved = (function(){{ try {{ return localStorage.getItem('wiom.dash.tab'); }} catch(e) {{ return null; }} }})();
