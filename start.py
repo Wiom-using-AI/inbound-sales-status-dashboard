@@ -65,26 +65,15 @@ def refresh():
           "Daily refresh complete.", flush=True)
 
 
-def next_hourly_tick(now):
-    """Return next top-of-hour IST between 08:00 and 22:00."""
-    candidate = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
-    # If next hour is outside active window, jump to 08:00 next day
-    if candidate.hour > 22:
-        candidate = (candidate + timedelta(days=1)).replace(hour=8, minute=0,
-                                                             second=0, microsecond=0)
-    elif candidate.hour < 8:
-        candidate = candidate.replace(hour=8, minute=0, second=0, microsecond=0)
-    return candidate
-
+PULL_INTERVAL_SECONDS = 3600   # pull every 60 minutes
 
 def scheduler_loop():
+    """Wait exactly 60 minutes, then pull + rebuild. Repeat forever."""
     while True:
-        now      = datetime.now(IST)
-        target   = next_hourly_tick(now)
-        wait_sec = (target - now).total_seconds()
-        print(f"[scheduler] Next refresh at {target.strftime('%Y-%m-%d %H:%M')} IST "
-              f"(in {wait_sec/60:.0f} min)", flush=True)
-        time.sleep(wait_sec)
+        next_at = datetime.now(IST) + timedelta(seconds=PULL_INTERVAL_SECONDS)
+        print(f"[scheduler] Next refresh at {next_at.strftime('%Y-%m-%d %H:%M')} IST "
+              f"(in 60 min)", flush=True)
+        time.sleep(PULL_INTERVAL_SECONDS)
         try:
             refresh()
         except Exception as e:
