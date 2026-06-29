@@ -133,6 +133,24 @@ GROUP BY 1, 2, 3, 4
 ORDER BY 1, 2, 3, 4
 """
 
+SQL_CSAT = """
+SELECT
+    TO_DATE(CALL_DATE_AND_TIME, 'MM/DD/YY HH12:MI AM')                   AS call_date,
+    COUNT(*)                                                               AS surveys_sent,
+    SUM(CASE WHEN TRY_TO_NUMBER(FEEDBACK_INPUT) IS NOT NULL THEN 1 ELSE 0 END)  AS numeric_responses,
+    SUM(CASE WHEN TRY_TO_NUMBER(FEEDBACK_INPUT) IN (4,5)   THEN 1 ELSE 0 END)   AS satisfied,
+    ROUND(DIV0(
+        SUM(CASE WHEN TRY_TO_NUMBER(FEEDBACK_INPUT) IN (4,5) THEN 1 ELSE 0 END),
+        SUM(CASE WHEN TRY_TO_NUMBER(FEEDBACK_INPUT) IS NOT NULL THEN 1 ELSE 0 END)
+    ) * 100, 1)                                                           AS csat_pct
+FROM PROD_DB.PUBLIC.AMEYO_CSAT_REPORT_TABLE
+WHERE SOURCE_CAMPAIGN = 'customerSupportInbound'
+  AND QUEUE_NAME      = 'sales_queue'
+  AND TO_DATE(CALL_DATE_AND_TIME, 'MM/DD/YY HH12:MI AM') >= '2026-02-01'
+GROUP BY 1
+ORDER BY 1
+"""
+
 print("Pulling disposition counts (Sales & Status Queue)...")
 run_query(SQL_COUNTS, data_dir / "sales_daily.csv")
 
@@ -141,3 +159,6 @@ run_query(SQL_METRICS, data_dir / "sales_metrics.csv")
 
 print("Pulling hourly data (Sales & Status Queue — last 8 days)...")
 run_query(SQL_HOURLY, data_dir / "sales_hourly.csv")
+
+print("Pulling CSAT data (customerSupportInbound -> sales_queue)...")
+run_query(SQL_CSAT, data_dir / "sales_csat.csv")

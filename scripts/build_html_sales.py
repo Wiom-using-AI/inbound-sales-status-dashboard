@@ -30,6 +30,7 @@ _BASE = Path(__file__).resolve().parent.parent
 SRC = Path(_os.environ.get("DATA_DIR", str(_BASE / "data"))) / "sales_daily.csv"
 SRC_METRICS = Path(_os.environ.get("DATA_DIR", str(_BASE / "data"))) / "sales_metrics.csv"
 SRC_HOURLY  = Path(_os.environ.get("DATA_DIR", str(_BASE / "data"))) / "sales_hourly.csv"
+SRC_CSAT    = Path(_os.environ.get("DATA_DIR", str(_BASE / "data"))) / "sales_csat.csv"
 OUT_DIR = _BASE / "output" / "web_sales"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 OUT = OUT_DIR / "index.html"
@@ -49,6 +50,18 @@ if SRC_METRICS.exists():
             "aht":        float(mr["AVG_AHT_SEC"]),
             "agents":     int(mr.get("AGENTS_LOGGED", 0)),
             "queue_wait": float(mr.get("AVG_QUEUE_WAIT_SEC") or 0),
+        }
+
+# Load CSAT data (customerSupportInbound → sales_queue)
+# csat_by_date[date] = {"pct": float, "responses": int, "satisfied": int}
+csat_by_date = {}
+if SRC_CSAT.exists():
+    for cr in csv.DictReader(SRC_CSAT.open()):
+        d = date.fromisoformat(cr["CALL_DATE"])
+        csat_by_date[d] = {
+            "pct":       float(cr["CSAT_PCT"])          if cr["CSAT_PCT"]          else 0.0,
+            "responses": int(cr["NUMERIC_RESPONSES"])   if cr["NUMERIC_RESPONSES"] else 0,
+            "satisfied": int(cr["SATISFIED"])           if cr["SATISFIED"]         else 0,
         }
 
 # Normalise legacy label
@@ -432,6 +445,30 @@ def metrics_table(ym):
     cells.append(f'<td class="num prev avgcol">{fmt_pct(trans_pct_pavg)}</td>')
     for d in days_desc:
         cells.append(f'<td class="num">{fmt_pct(trans_pct_day.get(d, 0))}</td>')
+    rows_html.append(f'<tr class="row-class">{"".join(cells)}</tr>')
+
+    # Row 7: CSAT % (Score 4 or 5 / numeric responses; MTD excludes today's partial day)
+    def _fmt_csat(val):
+        return f'{val:.1f}%' if val is not None else '—'
+
+    # MTD: weighted avg over complete days only (exclude today)
+    csat_mtd_days = [d for d in all_days_in_month if d < today and d in csat_by_date]
+    csat_mtd_resp = sum(csat_by_date[d]["responses"] for d in csat_mtd_days)
+    csat_mtd_sat  = sum(csat_by_date[d]["satisfied"]  for d in csat_mtd_days)
+    csat_mtd_pct  = (csat_mtd_sat / csat_mtd_resp * 100) if csat_mtd_resp > 0 else None
+
+    # Prev month: weighted avg
+    csat_prev_days = [d for d in prev_days if d in csat_by_date]
+    csat_prev_resp = sum(csat_by_date[d]["responses"] for d in csat_prev_days)
+    csat_prev_sat  = sum(csat_by_date[d]["satisfied"]  for d in csat_prev_days)
+    csat_prev_pct  = (csat_prev_sat / csat_prev_resp * 100) if csat_prev_resp > 0 else None
+
+    cells = ['<td class="disp disp-class">CSAT %</td>']
+    cells.append(f'<td class="num mtd avgcol">{_fmt_csat(csat_mtd_pct)}</td>')
+    cells.append(f'<td class="num prev avgcol">{_fmt_csat(csat_prev_pct)}</td>')
+    for d in days_desc:
+        v = csat_by_date.get(d)
+        cells.append(f'<td class="num">{"—" if v is None or v["responses"] == 0 else _fmt_csat(v["pct"])}</td>')
     rows_html.append(f'<tr class="row-class">{"".join(cells)}</tr>')
 
     return f'<table class="dash metrics-dash"><thead>{thead}</thead><tbody>{"".join(rows_html)}</tbody></table>'
