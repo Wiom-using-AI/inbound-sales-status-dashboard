@@ -812,7 +812,7 @@ function renderCurrent(selDate) {
       plugins: {
         title: {
           display: true,
-          text: 'Hourly Call Volume — ' + selDate + ' vs 7-Day Average (IST)',
+          text: 'Hourly Call Volume — ' + selDate + ' vs 7-Day Average',
         },
         legend: { position: 'top' },
       },

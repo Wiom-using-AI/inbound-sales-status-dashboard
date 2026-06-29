@@ -116,9 +116,9 @@ data_dir = Path(os.environ.get("DATA_DIR",
 
 SQL_HOURLY = """
 SELECT
-  CONVERT_TIMEZONE('UTC', 'Asia/Kolkata', CALL_TIME)::DATE  AS call_date,
-  HOUR(CONVERT_TIMEZONE('UTC', 'Asia/Kolkata', CALL_TIME))  AS call_hour,
-  COUNT(*) AS call_count
+  CALL_TIME::DATE  AS call_date,
+  HOUR(CALL_TIME)  AS call_hour,
+  COUNT(*)         AS call_count
 FROM PROD_DB.PUBLIC.AMEYO_CALL_DETAILS_REPORT
 WHERE CALL_TYPE = 'inbound.call.dial'
   AND (
@@ -126,8 +126,7 @@ WHERE CALL_TYPE = 'inbound.call.dial'
     OR
     (CALL_TIME::DATE < '2026-04-01' AND QUEUE_NAME IN ('sales_queue', 'booking_queue'))
   )
-  AND CONVERT_TIMEZONE('UTC', 'Asia/Kolkata', CALL_TIME)::DATE
-      >= DATEADD('day', -14, CURRENT_DATE)
+  AND CALL_TIME::DATE >= DATEADD('day', -14, CURRENT_DATE)
 GROUP BY 1, 2
 ORDER BY 1, 2
 """
