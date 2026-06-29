@@ -830,13 +830,14 @@ function renderCurrent(selDate) {
     return p[2] + '-' + _mns[parseInt(p[1])-1];
   }
 
+  const _thStyle = 'position:static;top:auto;';
   let thtml = '<div style="overflow-x:auto;margin-top:16px">'
     + '<table class="dash" style="min-width:640px"><thead><tr>';
-  thtml += '<th style="min-width:110px">Hour (IST)</th>';
-  thtml += '<th style="min-width:80px">7D Avg</th>';
-  thtml += '<th style="min-width:80px">Today</th>';
-  thtml += '<th style="min-width:90px">vs 7D Avg</th>';
-  prev7.forEach(d => { thtml += '<th style="min-width:65px">' + _fmtD(d) + '</th>'; });
+  thtml += '<th style="' + _thStyle + 'min-width:110px">Hour (IST)</th>';
+  thtml += '<th style="' + _thStyle + 'min-width:80px">7D Avg</th>';
+  thtml += '<th style="' + _thStyle + 'min-width:80px">Today</th>';
+  thtml += '<th style="' + _thStyle + 'min-width:90px">vs 7D Avg</th>';
+  prev7.forEach(d => { thtml += '<th style="' + _thStyle + 'min-width:65px">' + _fmtD(d) + '</th>'; });
   thtml += '</tr></thead><tbody>';
 
   for (let h = 0; h < 24; h++) {
@@ -860,7 +861,7 @@ function renderCurrent(selDate) {
     thtml += '<td class="num mtd avgcol">'
            + (a > 0 ? (Math.round(a * 10)/10).toFixed(1) : '0') + '</td>';
     thtml += '<td class="num" style="' + todayStyle + '">' + t
-           + (spiked ? '<span class="spike">(+' + pct + '%) &#8593;</span>' : '') + '</td>';
+           + (spiked ? '<span class="spike">&#9650; SPIKE +' + pct + '%</span>' : '') + '</td>';
     thtml += '<td class="num">' + pctStr + '</td>';
     prev7.forEach(d => {
       const v = (HOURLY_DATA[d] || [])[h] || 0;
