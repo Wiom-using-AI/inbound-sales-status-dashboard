@@ -82,11 +82,13 @@ ORDER BY 1, 2, 3
 SQL_METRICS = """
 WITH base AS (
   SELECT
-    CALL_TIME::DATE                                                  AS call_date,
-    COALESCE(NULLIF(TRIM(DISPOSITION_CLASS), ''), 'Missed') AS disposition_class,
-    DATEDIFF('second', '00:00:00'::TIME, TRY_TO_TIME(USER_TALK_TIME))  AS talk_sec,
-    DATEDIFF('second', '00:00:00'::TIME, TRY_TO_TIME(ACW_DURATION))    AS acw_sec,
-    DATEDIFF('second', '00:00:00'::TIME, TRY_TO_TIME(IVR_TIME))        AS queue_wait_sec,
+    CALL_TIME::DATE                                                       AS call_date,
+    -- Missed = customer never reached an agent (USER_TALK_TIME is NULL or 00:00:00)
+    -- Matches Ameyo's HUNGUP definition exactly
+    CASE WHEN COALESCE(USER_TALK_TIME, '00:00:00') = '00:00:00' THEN 1 ELSE 0 END AS is_missed,
+    DATEDIFF('second', '00:00:00'::TIME, TRY_TO_TIME(USER_TALK_TIME))    AS talk_sec,
+    DATEDIFF('second', '00:00:00'::TIME, TRY_TO_TIME(ACW_DURATION))      AS acw_sec,
+    DATEDIFF('second', '00:00:00'::TIME, TRY_TO_TIME(IVR_TIME))          AS queue_wait_sec,
     USER_ID
   FROM PROD_DB.PUBLIC.AMEYO_CALL_DETAILS_REPORT
   WHERE CALL_TYPE = 'inbound.call.dial'
@@ -99,8 +101,8 @@ WITH base AS (
 SELECT
   call_date,
   COUNT(*)                                             AS total_calls,
-  SUM(CASE WHEN disposition_class = 'Missed' THEN 1 ELSE 0 END)  AS missed_calls,
-  AVG(CASE WHEN disposition_class != 'Missed'
+  SUM(is_missed)                                       AS missed_calls,
+  AVG(CASE WHEN is_missed = 0
       THEN COALESCE(talk_sec, 0) + COALESCE(acw_sec, 0)
       END)                                             AS avg_aht_sec,
   COUNT(DISTINCT USER_ID)                              AS agents_logged,
