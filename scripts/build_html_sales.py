@@ -734,24 +734,25 @@ cur_tab_css = """
 /* curr-table: no sticky header (inside scrollable div) */
 .curr-table thead th { position: static; top: auto; z-index: auto; }
 .curr-table td:first-child, .curr-table th:first-child { position: static; z-index: auto; box-shadow: none; }
-/* ---- Spike Remarks ---- */
-.spike-remarks { background: #FFF8E1; border: 1px solid #FFE082;
-  border-radius: 8px; padding: 12px 16px; margin-top: 16px; }
-.spike-remarks-title { font-weight: 700; font-size: 12px; color: #E65100; margin-bottom: 10px; }
-.srk-row { display: flex; align-items: flex-start; gap: 12px; padding: 7px 0;
-  border-bottom: 1px solid #FFE082; flex-wrap: wrap; }
-.srk-row:last-child { border-bottom: none; }
-.srk-hour { font-weight: 700; font-size: 12px; min-width: 120px; color: #333; }
-.srk-badge { font-size: 11px; font-weight: 700; border-radius: 10px;
-  padding: 2px 10px; white-space: nowrap; }
-.srk-red { background: #FFEBEE; color: #C62828; }
-.srk-detail { flex: 1; display: flex; flex-wrap: wrap; gap: 8px; }
-.srk-cls { background: #fff; border: 1px solid #FFE082; border-radius: 6px;
-  padding: 4px 10px; font-size: 11.5px; }
-.srk-cls-name { font-weight: 600; color: #E91E8C; }
-.srk-cls-cnt { color: var(--text); font-weight: 700; margin-left: 4px; }
-.srk-code { padding-left: 12px; margin-top: 2px; font-size: 10.5px; color: var(--muted); }
-.srk-code-cnt { font-weight: 600; color: var(--text); margin-left: 4px; }
+/* ---- Spike Remarks cards ---- */
+.spike-remarks { background: transparent; border: none;
+  padding: 0; margin-top: 20px; box-shadow: none; }
+.spike-remarks-title { font-weight: 700; font-size: 13px; color: #333; margin-bottom: 12px;
+  display: flex; align-items: center; gap: 6px; }
+.srk-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 12px; }
+.srk-card { background: #fff; border: 1px solid #E0E0E0; border-radius: 8px;
+  padding: 12px 14px; box-shadow: 0 1px 3px rgba(0,0,0,.05); }
+.srk-card-hdr { font-size: 12.5px; color: #333; margin-bottom: 8px; line-height: 1.5; }
+.srk-tbl { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+.srk-tbl th { padding: 4px 8px; text-align: left; font-weight: 600; border-bottom: 1px solid #E0E0E0;
+  background: #F5F5F5; color: #555; white-space: nowrap; }
+.srk-tbl th.num { text-align: center; }
+.srk-tbl td { padding: 4px 8px; border-bottom: 1px solid #F0F0F0; vertical-align: middle; }
+.srk-tbl td.num { text-align: center; }
+.srk-tbl tr:last-child td { border-bottom: none; }
+.srk-tbl tr.srk-code-row td { background: #FAFAFA; }
+.srk-tbl td.srk-cls-name { color: #E91E8C; font-weight: 700; }
+.srk-tbl td.srk-code-name { color: #555; padding-left: 22px; font-size: 11px; }
 """
 
 # JS for Current tab (plain string — curly braces don't need escaping here)
@@ -963,8 +964,17 @@ window.renderCurrent = function(dateStr) {
   thtml += '</tr></tbody></table></div>';
   document.getElementById('curTable').innerHTML = thtml;
 
-  // Spike Remarks
-  var spikeRows = [];
+  // Spike Remarks — card per spiked hour with class breakdown table
+  function _esc(s) {
+    return String(s).replace(/[<>&"]/g, function(c) {
+      return {'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c];
+    });
+  }
+  var _dMns = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  var _dp   = dateStr.split('-');
+  var _dateLabel = parseInt(_dp[2]) + '-' + _dMns[parseInt(_dp[1]) - 1];
+
+  var spikeCards = [];
   for (var i2 = 0; i2 < wkHours.length; i2++) {
     var h2  = wkHours[i2];
     var tv2 = todayVals[i2];
@@ -974,53 +984,94 @@ window.renderCurrent = function(dateStr) {
     var hd2     = dayHours[String(h2)];
     var detail2 = (hd2 && hd2.d) ? hd2.d : {};
 
-    function _esc(s) {
-      return String(s).replace(/[<>&"]/g, function(c) {
-        return {'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c];
-      });
-    }
-
-    var clsEntries = Object.keys(detail2).map(function(cls) {
+    // Per-class today totals
+    var clsTodayMap = {};
+    Object.keys(detail2).forEach(function(cls) {
       var codes = detail2[cls];
-      var tot = Object.keys(codes).reduce(function(s, k) { return s + codes[k]; }, 0);
-      return { cls: cls, tot: tot, codes: codes };
-    }).filter(function(e) { return e.tot > 0; })
-      .sort(function(a, b) { return b.tot - a.tot; });
-
-    var clsHtml = '';
-    clsEntries.forEach(function(e) {
-      clsHtml += '<div class="srk-cls"><span class="srk-cls-name">' + _esc(e.cls)
-               + '</span><span class="srk-cls-cnt"> ' + e.tot + '</span>';
-      var codeArr = Object.keys(e.codes).map(function(c) {
-        return { code: c, cnt: e.codes[c] };
-      }).filter(function(x) { return x.cnt > 0; })
-        .sort(function(a, b) { return b.cnt - a.cnt; });
-      if (codeArr.length > 1) {
-        codeArr.forEach(function(x) {
-          clsHtml += '<div class="srk-code"><span class="srk-code-name">' + _esc(x.code)
-                   + '</span><span class="srk-code-cnt"> ' + x.cnt + '</span></div>';
-        });
-      }
-      clsHtml += '</div>';
+      clsTodayMap[cls] = Object.keys(codes).reduce(function(s, k) { return s + codes[k]; }, 0);
     });
 
-    spikeRows.push(
-      '<div class="srk-row">'
-      + '<div class="srk-hour">' + h2 + ':00–' + (h2 + 1) + ':00</div>'
-      + '<div class="srk-badge srk-red">&#9650; +' + pct2 + '%</div>'
-      + '<div class="srk-detail">'
-      + (clsHtml || '<em style="color:#999">no breakdown available</em>')
+    // Per-class 7D avg (from past dates)
+    var clsAvgRaw = {};
+    past.forEach(function(d) {
+      var phd = (PAYLOAD[d] || {})[String(h2)];
+      var pd  = (phd && phd.d) ? phd.d : {};
+      Object.keys(pd).forEach(function(cls) {
+        var cnt = Object.keys(pd[cls]).reduce(function(s, k) { return s + pd[cls][k]; }, 0);
+        clsAvgRaw[cls] = (clsAvgRaw[cls] || 0) + cnt;
+      });
+    });
+    var clsAvgMap = {};
+    Object.keys(clsAvgRaw).forEach(function(cls) {
+      clsAvgMap[cls] = past.length > 0 ? clsAvgRaw[cls] / past.length : 0;
+    });
+
+    // Union of classes from today + history, sort by today's count desc
+    var allCls = Object.keys(Object.assign({}, clsTodayMap, clsAvgMap));
+    allCls.sort(function(a, b) { return (clsTodayMap[b] || 0) - (clsTodayMap[a] || 0); });
+
+    // Build table rows
+    var trows = '';
+    allCls.forEach(function(cls) {
+      var todayCnt = clsTodayMap[cls] || 0;
+      var avgCnt   = clsAvgMap[cls]   || 0;
+      var vsPct    = avgCnt > 0 ? Math.round((todayCnt - avgCnt) / avgCnt * 100) : null;
+      var vsHtml   = vsPct !== null
+        ? '<span style="color:' + (vsPct > 0 ? '#C62828' : '#2E7D32') + ';font-weight:700">'
+          + (vsPct > 0 ? '+' : '') + vsPct + '% ' + (vsPct > 0 ? '&#8593;' : '&#8595;') + '</span>'
+        : '<span style="color:#999">—</span>';
+      trows += '<tr>'
+        + '<td class="srk-cls-name">' + _esc(cls) + '</td>'
+        + '<td class="num" style="font-weight:700">' + todayCnt + '</td>'
+        + '<td class="num" style="color:#555">' + Math.round(avgCnt) + '</td>'
+        + '<td class="num">' + vsHtml + '</td>'
+        + '</tr>';
+
+      // Sub-code rows (show when multiple codes today)
+      var codeMap  = (detail2[cls] || {});
+      var codeArr  = Object.keys(codeMap)
+        .filter(function(c) { return codeMap[c] > 0; })
+        .sort(function(a, b) { return codeMap[b] - codeMap[a]; });
+      if (codeArr.length > 1) {
+        codeArr.forEach(function(code) {
+          trows += '<tr class="srk-code-row">'
+            + '<td class="srk-code-name">' + _esc(code) + '</td>'
+            + '<td class="num" style="color:#333;font-size:11px">' + codeMap[code] + '</td>'
+            + '<td class="num" style="color:#999;font-size:11px">—</td>'
+            + '<td class="num" style="color:#999;font-size:11px">—</td>'
+            + '</tr>';
+        });
+      }
+    });
+
+    var dotColor = pct2 >= 25 ? '#C62828' : '#E65100';
+    spikeCards.push(
+      '<div class="srk-card">'
+      + '<div class="srk-card-hdr">'
+      + '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;'
+      + 'background:' + dotColor + ';margin-right:8px;vertical-align:middle"></span>'
+      + '<strong>' + h2 + ':00–' + (h2 + 1) + ':00</strong>'
+      + ' — ' + tv2 + ' calls vs 7D avg ' + Math.round(av2)
+      + ' <span style="color:' + dotColor + ';font-weight:700">(+' + pct2 + '%)</span>'
+      + '</div>'
+      + '<div style="overflow-x:auto">'
+      + '<table class="srk-tbl"><thead><tr>'
+      + '<th>Disposition Class / Sub-category</th>'
+      + '<th class="num">' + _dateLabel + '</th>'
+      + '<th class="num">7D Avg</th>'
+      + '<th class="num">vs Avg</th>'
+      + '</tr></thead><tbody>' + trows + '</tbody></table>'
       + '</div></div>'
     );
   }
 
   var spikeEl = document.getElementById('curSpike');
   if (spikeEl) {
-    if (spikeRows.length === 0) {
+    if (spikeCards.length === 0) {
       spikeEl.innerHTML = '<div style="color:#666;font-size:12px;padding:8px 0">'
         + 'No spike hours detected for ' + dateStr + '.</div>';
     } else {
-      spikeEl.innerHTML = spikeRows.join('');
+      spikeEl.innerHTML = '<div class="srk-cards">' + spikeCards.join('') + '</div>';
     }
   }
 };
@@ -1051,7 +1102,10 @@ else:
         '</div>'
         '<div id="curTable"></div>'
         '<div class="spike-remarks">'
-          '<div class="spike-remarks-title">&#9650; Spike Remarks &mdash; Disposition Breakdown</div>'
+          '<div class="spike-remarks-title">'
+            '<span style="font-size:14px">&#128269;</span>'
+            'Spike Remarks &mdash; What drove the spike?'
+          '</div>'
           '<div id="curSpike"><div style="color:#666;font-size:12px;padding:8px 0">'
           'Select a date to view spike details.</div></div>'
         '</div>'
