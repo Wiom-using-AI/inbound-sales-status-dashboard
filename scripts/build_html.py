@@ -319,6 +319,38 @@ def metrics_table(ym):
         cells.append(f'<td class="num">{agents_day.get(d, 0)}</td>')
     rows_html.append(f'<tr class="row-class">{"".join(cells)}</tr>')
 
+    # Row 5: Transferred % (to AQ) — calls with cls = "user.transferred.to.campaign"
+    trans_day  = {}
+    trans_prev = {}
+    for d in days_desc:
+        trans_day[d] = sum(
+            dd.get(d, 0) for (cls, _c), dd in counts.items()
+            if cls == "user.transferred.to.campaign"
+        )
+    for d in prev_days:
+        trans_prev[d] = sum(
+            dd.get(d, 0) for (cls, _c), dd in counts.items()
+            if cls == "user.transferred.to.campaign"
+        )
+    trans_complete = {d: trans_day[d] for d in complete_days}
+
+    def _tpct(t, v):
+        return (t / v * 100) if v else 0
+
+    trans_pct_day  = {d: _tpct(trans_day.get(d, 0),  vol_day.get(d, 0))  for d in days_desc}
+    trans_pct_prev = {d: _tpct(trans_prev.get(d, 0), vol_prev.get(d, 0)) for d in prev_days}
+    _tot_trans_mtd  = sum(trans_complete.values())
+    trans_pct_mtd   = (_tot_trans_mtd  / _tot_calls_mtd  * 100) if _tot_calls_mtd  else 0
+    _tot_trans_prev = sum(trans_prev.values())
+    trans_pct_pavg  = (_tot_trans_prev / _tot_calls_prev * 100) if _tot_calls_prev else 0
+
+    cells = ['<td class="disp disp-class">Transferred % (to AQ)</td>']
+    cells.append(f'<td class="num mtd avgcol">{fmt_pct(trans_pct_mtd)}</td>')
+    cells.append(f'<td class="num prev avgcol">{fmt_pct(trans_pct_pavg)}</td>')
+    for d in days_desc:
+        cells.append(f'<td class="num">{fmt_pct(trans_pct_day.get(d, 0))}</td>')
+    rows_html.append(f'<tr class="row-class">{"".join(cells)}</tr>')
+
     return f'<table class="dash metrics-dash"><thead>{thead}</thead><tbody>{"".join(rows_html)}</tbody></table>'
 
 # ---------------------------------------------------------------- build month tables
