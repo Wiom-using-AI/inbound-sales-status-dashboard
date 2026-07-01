@@ -245,8 +245,14 @@ def metrics_table(ym):
     TODAY = date.today()
     days_desc = sorted(by_month[ym], reverse=True)
     prev_ym = (ym[0], ym[1] - 1) if ym[1] > 1 else (ym[0] - 1, 12)
-    prev_days = sorted(by_month.get(prev_ym, []))
-    prev_label = f"{fmt_month(prev_ym)} Avg" if prev_days else "Prev Month Avg"
+    _all_prev = sorted(by_month.get(prev_ym, []))
+    # July 2026: Jun 1-15 had atypically high volume → baseline = Jun 16-30 only
+    if ym == (2026, 7):
+        prev_days = [d for d in _all_prev if d >= date(2026, 6, 16)]
+        prev_label = "Avg 16-30 Jun"
+    else:
+        prev_days = _all_prev
+        prev_label = f"{fmt_month(prev_ym)} Avg" if prev_days else "Prev Month Avg"
     cur_avg_label = f"{fmt_month(ym)} Avg (MTD)"
 
     headers = ["Metrics", cur_avg_label, prev_label] + [d.strftime("%d-%b") for d in days_desc]
@@ -397,8 +403,13 @@ def month_table(ym):
     # Complete days = all days before today (exclude partial current day from avg)
     complete_days = [d for d in days_desc if d < TODAY]
     prev_ym = (ym[0], ym[1] - 1) if ym[1] > 1 else (ym[0] - 1, 12)
-    prev_days = sorted(by_month.get(prev_ym, []))
-    prev_label = f"{fmt_month(prev_ym)} Avg" if prev_days else "Prev Month Avg"
+    _all_prev_m = sorted(by_month.get(prev_ym, []))
+    if ym == (2026, 7):
+        prev_days = [d for d in _all_prev_m if d >= date(2026, 6, 16)]
+        prev_label = "Avg 16-30 Jun"
+    else:
+        prev_days = _all_prev_m
+        prev_label = f"{fmt_month(prev_ym)} Avg" if prev_days else "Prev Month Avg"
 
     ym_str      = f"{ym[0]:04d}-{ym[1]:02d}"
     prev_ym_str = f"{prev_ym[0]:04d}-{prev_ym[1]:02d}"
@@ -1127,6 +1138,8 @@ def compute_highlights(ym, cur_days_set=None):
         return hl
     prev_ym = (ym[0], ym[1] - 1) if ym[1] > 1 else (ym[0] - 1, 12)
     prev_days_set = by_month.get(prev_ym, set())
+    if ym == (2026, 7):
+        prev_days_set = {d for d in prev_days_set if d >= date(2026, 6, 16)}
     if cur_days_set is None:
         cur_days_set = by_month[ym]
 
@@ -1187,7 +1200,10 @@ def build_hl_html(ym, tab_id, is_current_month=False):
         title = f'Top spikes — {period_lbl} vs {fmt_month(prev_ym)} avg'
     else:
         hl = compute_highlights(ym)
-        title = f'Top spikes — {fmt_month(ym)} avg vs {fmt_month(prev_ym)} avg'
+        if ym == (2026, 7):
+            title = f'Top spikes — {fmt_month(ym)} avg vs Avg 16-30 Jun'
+        else:
+            title = f'Top spikes — {fmt_month(ym)} avg vs {fmt_month(prev_ym)} avg'
 
     if not hl:
         return ""
