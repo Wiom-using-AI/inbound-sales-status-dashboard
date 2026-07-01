@@ -246,16 +246,23 @@ def metrics_table(ym):
     days_desc = sorted(by_month[ym], reverse=True)
     prev_ym = (ym[0], ym[1] - 1) if ym[1] > 1 else (ym[0] - 1, 12)
     _all_prev = sorted(by_month.get(prev_ym, []))
-    # July 2026: Jun 1-15 had atypically high volume → baseline = Jun 16-30 only
+    # July 2026: show full Jun avg (info) + Jun 16-30 avg (spike baseline)
     if ym == (2026, 7):
-        prev_days = [d for d in _all_prev if d >= date(2026, 6, 16)]
-        prev_label = "Avg 16-30 Jun"
+        prev_days      = [d for d in _all_prev if d >= date(2026, 6, 16)]
+        prev_label     = "Avg 16-30 Jun"
+        full_prev_days = _all_prev          # full June — display only, no spike
+        full_prev_label = "Jun 2026 Avg"
     else:
-        prev_days = _all_prev
-        prev_label = f"{fmt_month(prev_ym)} Avg" if prev_days else "Prev Month Avg"
+        prev_days       = _all_prev
+        prev_label      = f"{fmt_month(prev_ym)} Avg" if prev_days else "Prev Month Avg"
+        full_prev_days  = None
+        full_prev_label = None
     cur_avg_label = f"{fmt_month(ym)} Avg (MTD)"
 
-    headers = ["Metrics", cur_avg_label, prev_label] + [d.strftime("%d-%b") for d in days_desc]
+    if full_prev_label:
+        headers = ["Metrics", cur_avg_label, full_prev_label, prev_label] + [d.strftime("%d-%b") for d in days_desc]
+    else:
+        headers = ["Metrics", cur_avg_label, prev_label] + [d.strftime("%d-%b") for d in days_desc]
     thead = "<tr>" + "".join(f"<th>{html.escape(h)}</th>" for h in headers) + "</tr>"
 
     # Gather per-day values (all days including today for daily columns)
@@ -265,6 +272,12 @@ def metrics_table(ym):
     vol_prev  = {d: metrics_by_date.get(d, {}).get("total", 0) for d in prev_days}
     miss_prev = {d: metrics_by_date.get(d, {}).get("missed", 0) for d in prev_days}
     aht_prev  = {d: metrics_by_date.get(d, {}).get("aht", 0) for d in prev_days}
+    # Full-prev (info only — only non-empty for July 2026)
+    _fpd = full_prev_days or []
+    vol_fprev    = {d: metrics_by_date.get(d, {}).get("total",   0) for d in _fpd}
+    miss_fprev   = {d: metrics_by_date.get(d, {}).get("missed",  0) for d in _fpd}
+    aht_fprev    = {d: metrics_by_date.get(d, {}).get("aht",     0) for d in _fpd}
+    agents_fprev = {d: metrics_by_date.get(d, {}).get("agents",  0) for d in _fpd}
 
     # MTD avg: exclude today (partial day) — only complete days count
     complete_days = [d for d in days_desc if d < TODAY]
@@ -272,12 +285,15 @@ def metrics_table(ym):
     miss_complete = {d: miss_day[d] for d in complete_days}
     aht_complete  = {d: aht_day[d]  for d in complete_days}
 
-    vol_mtd  = avg(vol_complete.values())  if vol_complete  else 0
-    vol_pavg = avg(vol_prev.values())      if vol_prev      else 0
-    miss_mtd  = avg(miss_complete.values()) if miss_complete else 0
-    miss_pavg = avg(miss_prev.values())     if miss_prev     else 0
-    aht_mtd  = avg(aht_complete.values())  if aht_complete  else 0
-    aht_pavg = avg(aht_prev.values())      if aht_prev      else 0
+    vol_mtd   = avg(vol_complete.values())  if vol_complete  else 0
+    vol_pavg  = avg(vol_prev.values())      if vol_prev      else 0
+    vol_fpavg = avg(vol_fprev.values())     if vol_fprev     else 0
+    miss_mtd   = avg(miss_complete.values()) if miss_complete else 0
+    miss_pavg  = avg(miss_prev.values())     if miss_prev     else 0
+    miss_fpavg = avg(miss_fprev.values())    if miss_fprev    else 0
+    aht_mtd   = avg(aht_complete.values())  if aht_complete  else 0
+    aht_pavg  = avg(aht_prev.values())      if aht_prev      else 0
+    aht_fpavg = avg(aht_fprev.values())     if aht_fprev     else 0
 
     # Missed call % per day (all days for daily columns)
     misspct_day = {}
@@ -297,12 +313,25 @@ def metrics_table(ym):
     _tot_calls_prev = sum(vol_prev.values())
     _tot_miss_prev  = sum(miss_prev.values())
     misspct_pavg = (_tot_miss_prev / _tot_calls_prev * 100) if _tot_calls_prev else 0
+    _tot_calls_fprev = sum(vol_fprev.values())
+    _tot_miss_fprev  = sum(miss_fprev.values())
+    misspct_fpavg = (_tot_miss_fprev / _tot_calls_fprev * 100) if _tot_calls_fprev else 0
+
+    # Helper: render a full-prev info-only cell (slightly muted, no spike)
+    _FPSTYLE = ' style="opacity:.8"'
+    def _fpc_num(val):
+        return (f'<td class="num prev avgcol"{_FPSTYLE}>{int(round(val or 0))}</td>'
+                if full_prev_label else "")
+    def _fpc_str(s):
+        return (f'<td class="num prev avgcol"{_FPSTYLE}>{s}</td>'
+                if full_prev_label else "")
 
     rows_html = []
 
     # Row 1: Call Volume
     cells = ['<td class="disp disp-class">Call Volume</td>']
     cells.append(f'<td class="num mtd avgcol">{int(round(vol_mtd))}</td>')
+    cells.append(_fpc_num(vol_fpavg))
     cells.append(f'<td class="num prev avgcol">{int(round(vol_pavg))}</td>')
     for d in days_desc:
         cells.append(f'<td class="num">{vol_day.get(d, 0)}</td>')
@@ -311,6 +340,7 @@ def metrics_table(ym):
     # Row 2: Missed Call %
     cells = ['<td class="disp disp-class">Missed Call %</td>']
     cells.append(f'<td class="num mtd avgcol">{fmt_pct(misspct_mtd)}</td>')
+    cells.append(_fpc_str(fmt_pct(misspct_fpavg)))
     cells.append(f'<td class="num prev avgcol">{fmt_pct(misspct_pavg)}</td>')
     for d in days_desc:
         cells.append(f'<td class="num">{fmt_pct(misspct_day.get(d, 0))}</td>')
@@ -319,6 +349,7 @@ def metrics_table(ym):
     # Row 3: AHT (M:SS)
     cells = ['<td class="disp disp-class">AHT (Avg Handle Time)</td>']
     cells.append(f'<td class="num mtd avgcol">{fmt_aht(aht_mtd)}</td>')
+    cells.append(_fpc_str(fmt_aht(aht_fpavg)))
     cells.append(f'<td class="num prev avgcol">{fmt_aht(aht_pavg)}</td>')
     for d in days_desc:
         cells.append(f'<td class="num">{fmt_aht(aht_day.get(d, 0))}</td>')
@@ -330,16 +361,19 @@ def metrics_table(ym):
     agents_complete = {d: agents_day[d] for d in complete_days}
     agents_mtd  = avg(agents_complete.values()) if agents_complete else 0
     agents_pavg = avg(agents_prev.values())     if agents_prev     else 0
+    agents_fpavg = avg(agents_fprev.values())   if agents_fprev    else 0
     cells = ['<td class="disp disp-class">Agents Logged</td>']
     cells.append(f'<td class="num mtd avgcol">{int(round(agents_mtd))}</td>')
+    cells.append(_fpc_num(agents_fpavg))
     cells.append(f'<td class="num prev avgcol">{int(round(agents_pavg))}</td>')
     for d in days_desc:
         cells.append(f'<td class="num">{agents_day.get(d, 0)}</td>')
     rows_html.append(f'<tr class="row-class">{"".join(cells)}</tr>')
 
     # Row 5: Transferred % (to AQ) — calls with disposition code = "user.transferred.to.aq"
-    trans_day  = {}
-    trans_prev = {}
+    trans_day   = {}
+    trans_prev  = {}
+    trans_fprev = {}
     for d in days_desc:
         trans_day[d] = sum(
             dd.get(d, 0) for (_cls, code), dd in counts.items()
@@ -350,20 +384,28 @@ def metrics_table(ym):
             dd.get(d, 0) for (_cls, code), dd in counts.items()
             if code == "user.transferred.to.aq"
         )
+    for d in _fpd:
+        trans_fprev[d] = sum(
+            dd.get(d, 0) for (_cls, code), dd in counts.items()
+            if code == "user.transferred.to.aq"
+        )
     trans_complete = {d: trans_day[d] for d in complete_days}
 
     def _tpct(t, v):
         return (t / v * 100) if v else 0
 
-    trans_pct_day  = {d: _tpct(trans_day.get(d, 0),  vol_day.get(d, 0))  for d in days_desc}
-    trans_pct_prev = {d: _tpct(trans_prev.get(d, 0), vol_prev.get(d, 0)) for d in prev_days}
-    _tot_trans_mtd  = sum(trans_complete.values())
-    trans_pct_mtd   = (_tot_trans_mtd  / _tot_calls_mtd  * 100) if _tot_calls_mtd  else 0
-    _tot_trans_prev = sum(trans_prev.values())
-    trans_pct_pavg  = (_tot_trans_prev / _tot_calls_prev * 100) if _tot_calls_prev else 0
+    trans_pct_day   = {d: _tpct(trans_day.get(d, 0),   vol_day.get(d, 0))   for d in days_desc}
+    trans_pct_prev  = {d: _tpct(trans_prev.get(d, 0),  vol_prev.get(d, 0))  for d in prev_days}
+    _tot_trans_mtd   = sum(trans_complete.values())
+    trans_pct_mtd    = (_tot_trans_mtd  / _tot_calls_mtd  * 100) if _tot_calls_mtd  else 0
+    _tot_trans_prev  = sum(trans_prev.values())
+    trans_pct_pavg   = (_tot_trans_prev / _tot_calls_prev * 100) if _tot_calls_prev else 0
+    _tot_trans_fprev = sum(trans_fprev.values())
+    trans_pct_fpavg  = (_tot_trans_fprev / _tot_calls_fprev * 100) if _tot_calls_fprev else 0
 
     cells = ['<td class="disp disp-class">Transferred % (to AQ)</td>']
     cells.append(f'<td class="num mtd avgcol">{fmt_pct(trans_pct_mtd)}</td>')
+    cells.append(_fpc_str(fmt_pct(trans_pct_fpavg)))
     cells.append(f'<td class="num prev avgcol">{fmt_pct(trans_pct_pavg)}</td>')
     for d in days_desc:
         cells.append(f'<td class="num">{fmt_pct(trans_pct_day.get(d, 0))}</td>')
@@ -376,17 +418,21 @@ def metrics_table(ym):
         sat  = c.get("satisfied", 0)
         return (sat / resp * 100) if resp else None
 
-    csat_pct_day  = {d: _csat_pct(d) for d in days_desc}
-    csat_pct_prev = {d: _csat_pct(d) for d in prev_days}
+    csat_pct_day   = {d: _csat_pct(d) for d in days_desc}
+    csat_pct_prev  = {d: _csat_pct(d) for d in prev_days}
+    csat_pct_fprev = {d: _csat_pct(d) for d in _fpd}
 
     # MTD avg (complete days only — exclude today's partial data)
     _csat_complete_vals = [v for d in complete_days if (v := _csat_pct(d)) is not None]
-    _csat_prev_vals     = [v for v in csat_pct_prev.values() if v is not None]
-    csat_pct_mtd  = avg(_csat_complete_vals) if _csat_complete_vals else None
-    csat_pct_pavg = avg(_csat_prev_vals)     if _csat_prev_vals     else None
+    _csat_prev_vals     = [v for v in csat_pct_prev.values()  if v is not None]
+    _csat_fprev_vals    = [v for v in csat_pct_fprev.values() if v is not None]
+    csat_pct_mtd   = avg(_csat_complete_vals) if _csat_complete_vals else None
+    csat_pct_pavg  = avg(_csat_prev_vals)     if _csat_prev_vals     else None
+    csat_pct_fpavg = avg(_csat_fprev_vals)    if _csat_fprev_vals    else None
 
     cells = ['<td class="disp disp-class">CSAT %</td>']
     cells.append(f'<td class="num mtd avgcol">{fmt_pct(csat_pct_mtd) if csat_pct_mtd is not None else "—"}</td>')
+    cells.append(_fpc_str(fmt_pct(csat_pct_fpavg) if csat_pct_fpavg is not None else "—"))
     cells.append(f'<td class="num prev avgcol">{fmt_pct(csat_pct_pavg) if csat_pct_pavg is not None else "—"}</td>')
     for d in days_desc:
         v = csat_pct_day.get(d)
@@ -404,23 +450,42 @@ def month_table(ym):
     complete_days = [d for d in days_desc if d < TODAY]
     prev_ym = (ym[0], ym[1] - 1) if ym[1] > 1 else (ym[0] - 1, 12)
     _all_prev_m = sorted(by_month.get(prev_ym, []))
+    # July 2026: show full Jun avg (info) + Jun 16-30 avg (spike baseline)
     if ym == (2026, 7):
-        prev_days = [d for d in _all_prev_m if d >= date(2026, 6, 16)]
-        prev_label = "Avg 16-30 Jun"
+        prev_days       = [d for d in _all_prev_m if d >= date(2026, 6, 16)]
+        prev_label      = "Avg 16-30 Jun"
+        full_prev_days  = _all_prev_m       # full June — display only, no spike
+        full_prev_label = "Jun 2026 Avg"
     else:
-        prev_days = _all_prev_m
-        prev_label = f"{fmt_month(prev_ym)} Avg" if prev_days else "Prev Month Avg"
+        prev_days       = _all_prev_m
+        prev_label      = f"{fmt_month(prev_ym)} Avg" if prev_days else "Prev Month Avg"
+        full_prev_days  = None
+        full_prev_label = None
 
+    _fpd = full_prev_days or []
+    _prev_days_set  = set(prev_days)   # Jun 16-30 for July; all prev days otherwise
+    _fpd_set        = set(_fpd)        # full June for July; empty otherwise
     ym_str      = f"{ym[0]:04d}-{ym[1]:02d}"
     prev_ym_str = f"{prev_ym[0]:04d}-{prev_ym[1]:02d}"
     cur_avg_label = f"{fmt_month(ym)} Avg (MTD)"
 
-    headers = ["Category", cur_avg_label, prev_label] + [d.strftime("%d-%b") for d in days_desc]
+    if full_prev_label:
+        headers = ["Category", cur_avg_label, full_prev_label, prev_label] + [d.strftime("%d-%b") for d in days_desc]
+    else:
+        headers = ["Category", cur_avg_label, prev_label] + [d.strftime("%d-%b") for d in days_desc]
     thead = "<tr>" + "".join(f"<th>{html.escape(h)}</th>" for h in headers) + "</tr>"
 
+    _FPSTYLE = ' style="opacity:.8"'
+    def _fpc(val):
+        """Full-prev info-only cell (no spike)."""
+        if not full_prev_label:
+            return ""
+        return f'<td class="num prev avgcol"{_FPSTYLE}>{int(round(val or 0))}</td>'
+
     body_rows = []
-    total_day = defaultdict(int)
-    total_prev_day = defaultdict(int)
+    total_day       = defaultdict(int)
+    total_prev_day  = defaultdict(int)   # keyed to prev_days (Jun 16-30 for July)
+    total_fprev_day = defaultdict(int)   # keyed to _fpd (full June for July)
 
     def mk_drill(cls, code, scope, d=None):
         return {"cls": cls, "code": code, "scope": scope,
@@ -428,8 +493,9 @@ def month_table(ym):
                 "ym": ym_str if scope != "prev" else prev_ym_str}
 
     for cls, codes in taxonomy:
-        class_day      = {d: 0 for d in days_desc}
-        class_prev_day = {d: 0 for d in prev_days}
+        class_day       = {d: 0 for d in days_desc}
+        class_prev_day  = {d: 0 for d in prev_days}
+        class_fprev_day = {d: 0 for d in _fpd}
         for (k_cls, _k_code), dd in counts.items():
             if k_cls != cls:
                 continue
@@ -438,15 +504,20 @@ def month_table(ym):
                     class_day[d] += n
                 if d in class_prev_day:
                     class_prev_day[d] += n
+                if d in class_fprev_day:
+                    class_fprev_day[d] += n
                 ym_of_d = (d.year, d.month)
                 if ym_of_d == ym:
                     total_day[d] += n
-                if ym_of_d == prev_ym:
+                if d in _prev_days_set:
                     total_prev_day[d] += n
+                if d in _fpd_set:
+                    total_fprev_day[d] += n
 
         # MTD avg uses complete days only (exclude today's partial data)
-        cls_mtd  = avg(class_day[d] for d in complete_days) if complete_days else 0
-        cls_prev = avg(class_prev_day.values())
+        cls_mtd   = avg(class_day[d] for d in complete_days) if complete_days else 0
+        cls_prev  = avg(class_prev_day.values())
+        cls_fprev = avg(class_fprev_day.values()) if class_fprev_day else 0
 
         cls_id = html.escape(cls.replace(" ", "_").replace("(", "").replace(")", ""))
         has_codes = len(codes) > 0
@@ -455,6 +526,7 @@ def month_table(ym):
         cells = [f'<td class="disp disp-class"{toggle_attr}>{toggle_icon}{html.escape(cls)}</td>']
         cells.append(cell_html(cls_mtd, cls_prev, is_mtd=True,
                                drill=mk_drill(cls, None, "mtd")))
+        cells.append(_fpc(cls_fprev))
         cells.append(cell_html(cls_prev, None, is_prev=True,
                                drill=mk_drill(cls, None, "prev")))
         for d in days_desc:
@@ -470,15 +542,18 @@ def month_table(ym):
         code_mtds.sort(key=lambda x: x[1], reverse=True)
 
         for code, _ in code_mtds:
-            day_vals  = {d: counts[(cls, code)].get(d, 0) for d in days_desc}
-            prev_vals = {d: counts[(cls, code)].get(d, 0) for d in prev_days}
+            day_vals   = {d: counts[(cls, code)].get(d, 0) for d in days_desc}
+            prev_vals  = {d: counts[(cls, code)].get(d, 0) for d in prev_days}
+            fprev_vals = {d: counts[(cls, code)].get(d, 0) for d in _fpd}
             # MTD avg: complete days only
-            mtd  = avg(day_vals[d] for d in complete_days) if complete_days else 0
-            prev = avg(prev_vals.values())
+            mtd   = avg(day_vals[d] for d in complete_days) if complete_days else 0
+            prev  = avg(prev_vals.values())
+            fprev = avg(fprev_vals.values()) if fprev_vals else 0
 
             cells = [f'<td class="disp disp-code">{html.escape(code)}</td>']
             cells.append(cell_html(mtd, prev, is_mtd=True,
                                    drill=mk_drill(cls, code, "mtd")))
+            cells.append(_fpc(fprev))
             cells.append(cell_html(prev, None, is_prev=True,
                                    drill=mk_drill(cls, code, "prev")))
             for d in days_desc:
@@ -487,10 +562,12 @@ def month_table(ym):
             body_rows.append(f'<tr class="row-code code-of-{cls_id}">{"".join(cells)}</tr>')
 
     # TOTAL row — complete days only for MTD avg
-    tot_mtd  = avg(total_day[d] for d in complete_days) if complete_days else 0
-    tot_prev = avg(total_prev_day.values())
+    tot_mtd   = avg(total_day[d] for d in complete_days) if complete_days else 0
+    tot_prev  = avg(total_prev_day.values())
+    tot_fprev = avg(total_fprev_day.values()) if total_fprev_day else 0
     tot_cells = ['<td class="disp total-label">TOTAL</td>']
     tot_cells.append(cell_html(tot_mtd, tot_prev, is_mtd=True))
+    tot_cells.append(_fpc(tot_fprev))
     tot_cells.append(cell_html(tot_prev, None, is_prev=True))
     for d in days_desc:
         tot_cells.append(cell_html(total_day.get(d, 0), tot_mtd))
