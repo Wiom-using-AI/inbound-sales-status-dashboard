@@ -55,10 +55,11 @@ if SRC_METRICS.exists():
     for mr in csv.DictReader(SRC_METRICS.open()):
         d = date.fromisoformat(mr["CALL_DATE"])
         metrics_by_date[d] = {
-            "total":  int(mr["TOTAL_CALLS"]),
-            "missed": int(mr["MISSED_CALLS"]),
-            "aht":    float(mr["AVG_AHT_SEC"]),
-            "agents": int(mr.get("AGENTS_LOGGED", 0)),
+            "total":     int(mr["TOTAL_CALLS"]),
+            "missed":    int(mr["MISSED_CALLS"]),
+            "aht":       float(mr["AVG_AHT_SEC"]),
+            "agents":    int(mr.get("AGENTS_LOGGED", 0)),
+            "low_pain":  int(mr.get("LOW_PAIN_CALLS", 0)),
         }
 
 # Load CSAT data: call_date -> {surveyed, responded, satisfied}
@@ -474,6 +475,33 @@ def metrics_table(ym):
     cells.append(f'<td class="num prev avgcol">{fmt_pct(repeat_pct_pavg) if repeat_pct_pavg is not None else "—"}</td>')
     for d in days_desc:
         v = repeat_pct_day.get(d)
+        cells.append(f'<td class="num">{fmt_pct(v) if v is not None else "—"}</td>')
+    rows_html.append(f'<tr class="row-class">{"".join(cells)}</tr>')
+
+    # Row 8: Low Pain % = low_pain_calls / total_calls × 100
+    def _lp_pct(d):
+        m = metrics_by_date.get(d, {})
+        total = m.get("total", 0)
+        lp    = m.get("low_pain", 0)
+        return (lp / total * 100) if total else None
+
+    lp_pct_day   = {d: _lp_pct(d) for d in days_desc}
+    lp_pct_prev  = {d: _lp_pct(d) for d in prev_days}
+    lp_pct_fprev = {d: _lp_pct(d) for d in _fpd}
+
+    _lp_complete_vals  = [v for d in complete_days if (v := _lp_pct(d)) is not None]
+    _lp_prev_vals      = [v for v in lp_pct_prev.values()  if v is not None]
+    _lp_fprev_vals     = [v for v in lp_pct_fprev.values() if v is not None]
+    lp_pct_mtd   = avg(_lp_complete_vals)  if _lp_complete_vals  else None
+    lp_pct_pavg  = avg(_lp_prev_vals)       if _lp_prev_vals      else None
+    lp_pct_fpavg = avg(_lp_fprev_vals)      if _lp_fprev_vals     else None
+
+    cells = ['<td class="disp disp-class">Low Pain %</td>']
+    cells.append(f'<td class="num mtd avgcol">{fmt_pct(lp_pct_mtd) if lp_pct_mtd is not None else "—"}</td>')
+    cells.append(_fpc_str(fmt_pct(lp_pct_fpavg) if lp_pct_fpavg is not None else "—"))
+    cells.append(f'<td class="num prev avgcol">{fmt_pct(lp_pct_pavg) if lp_pct_pavg is not None else "—"}</td>')
+    for d in days_desc:
+        v = lp_pct_day.get(d)
         cells.append(f'<td class="num">{fmt_pct(v) if v is not None else "—"}</td>')
     rows_html.append(f'<tr class="row-class">{"".join(cells)}</tr>')
 

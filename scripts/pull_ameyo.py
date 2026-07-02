@@ -79,6 +79,7 @@ SQL_METRICS = """
 WITH base AS (
   SELECT
     CALL_TIME::DATE AS call_date,
+    QUEUE_NAME,
     COALESCE(NULLIF(TRIM(DISPOSITION_CLASS), ''), 'Missed') AS disposition_class,
     DATEDIFF('second', '00:00:00'::TIME, TRY_TO_TIME(USER_TALK_TIME))  AS talk_sec,
     DATEDIFF('second', '00:00:00'::TIME, TRY_TO_TIME(ACW_DURATION))    AS acw_sec,
@@ -89,12 +90,13 @@ WITH base AS (
 )
 SELECT
   call_date,
-  COUNT(*)                                             AS total_calls,
-  SUM(CASE WHEN disposition_class = 'Missed' THEN 1 ELSE 0 END)  AS missed_calls,
+  COUNT(*)                                                              AS total_calls,
+  SUM(CASE WHEN disposition_class = 'Missed' THEN 1 ELSE 0 END)       AS missed_calls,
   AVG(CASE WHEN talk_sec > 0
       THEN talk_sec + COALESCE(acw_sec, 0)
-      END)                                             AS avg_aht_sec,
-  COUNT(DISTINCT USER_ID)                              AS agents_logged
+      END)                                                              AS avg_aht_sec,
+  COUNT(DISTINCT USER_ID)                                               AS agents_logged,
+  SUM(CASE WHEN queue_name = 'low_pain_queue' THEN 1 ELSE 0 END)      AS low_pain_calls
 FROM base
 WHERE call_date >= '2026-02-01'
 GROUP BY 1
