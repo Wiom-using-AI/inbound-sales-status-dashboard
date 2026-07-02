@@ -194,27 +194,6 @@ ORDER BY 1, 2
 print("Pulling sales queue phone numbers (for B2I conversion)...")
 run_query(SQL_PHONES, data_dir / "sales_phones.csv")
 
-# ---- Query 6: Total unique callers per day (all phones, any disposition) ----
-SQL_UNIQUE_CALLERS = """
-SELECT
-    CALL_TIME::DATE                                                             AS call_date,
-    COUNT(DISTINCT REGEXP_REPLACE(COALESCE(TRIM(PHONE), ''), '[^0-9]', ''))    AS unique_callers
-FROM PROD_DB.PUBLIC.AMEYO_CALL_DETAILS_REPORT
-WHERE CALL_TYPE = 'inbound.call.dial'
-  AND (
-    (CALL_TIME::DATE >= '2026-04-01' AND QUEUE_NAME = 'sales_queue')
-    OR
-    (CALL_TIME::DATE < '2026-04-01' AND QUEUE_NAME IN ('sales_queue', 'booking_queue'))
-  )
-  AND CALL_TIME::DATE >= '2026-05-01'
-  AND PHONE IS NOT NULL
-  AND TRIM(PHONE) != ''
-GROUP BY 1
-ORDER BY 1
-"""
-
-print("Pulling unique caller counts (all sales_queue callers per day)...")
-run_query(SQL_UNIQUE_CALLERS, data_dir / "sales_unique_callers.csv")
 
 # ---- Download B2I bookings from Google Sheet (B2I_Agg tab) ----
 B2I_URL = (
