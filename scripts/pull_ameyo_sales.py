@@ -164,3 +164,51 @@ run_query(SQL_HOURLY, data_dir / "sales_hourly.csv")
 
 print("Pulling CSAT data (customerSupportInbound -> sales_queue)...")
 run_query(SQL_CSAT, data_dir / "sales_csat.csv")
+
+# ---- Query 5: Sales queue caller phone numbers (for B2I conversion matching) ----
+SQL_PHONES = """
+SELECT
+    CALL_TIME::DATE  AS call_date,
+    REGEXP_REPLACE(COALESCE(TRIM(PHONE), ''), '[^0-9]', '') AS phone_clean
+FROM PROD_DB.PUBLIC.AMEYO_CALL_DETAILS_REPORT
+WHERE CALL_TYPE = 'inbound.call.dial'
+  AND (
+    (CALL_TIME::DATE >= '2026-04-01' AND QUEUE_NAME = 'sales_queue')
+    OR
+    (CALL_TIME::DATE < '2026-04-01' AND QUEUE_NAME IN ('sales_queue', 'booking_queue'))
+  )
+  AND CALL_TIME::DATE >= '2026-05-01'
+  AND PHONE IS NOT NULL
+  AND TRIM(PHONE) != ''
+GROUP BY 1, 2
+ORDER BY 1, 2
+"""
+
+print("Pulling sales queue phone numbers (for B2I conversion)...")
+run_query(SQL_PHONES, data_dir / "sales_phones.csv")
+
+# ---- Download B2I bookings from Google Sheet (B2I_Agg tab) ----
+B2I_URL = (
+    "https://docs.google.com/spreadsheets/d/"
+    "1FQke_07bIyI46LyirmUGRo6AKWBwXb-mJHmjFsBRT5k"
+    "/export?format=csv&gid=411960039"
+)
+
+def download_b2i(out_path):
+    req = urllib.request.Request(B2I_URL, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req, timeout=60) as r:
+        csv_bytes = r.read()
+    # Guard: if response looks like an error page, skip
+    text = csv_bytes.decode("utf-8", errors="replace").strip()
+    if not text or text.startswith("<!"):
+        print("  WARNING: B2I download returned unexpected content — skipping.")
+        return
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_bytes(csv_bytes)
+    with out_path.open("r", encoding="utf-8") as f:
+        n = sum(1 for _ in f) - 1
+    print(f"  Rows written: {n}")
+    print(f"  Wrote {out_path}")
+
+print("Downloading B2I bookings (Google Sheet -> B2I_Agg)...")
+download_b2i(data_dir / "b2i_bookings.csv")

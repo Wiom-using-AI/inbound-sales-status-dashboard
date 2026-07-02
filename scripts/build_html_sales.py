@@ -31,6 +31,8 @@ SRC = Path(_os.environ.get("DATA_DIR", str(_BASE / "data"))) / "sales_daily.csv"
 SRC_METRICS = Path(_os.environ.get("DATA_DIR", str(_BASE / "data"))) / "sales_metrics.csv"
 SRC_HOURLY  = Path(_os.environ.get("DATA_DIR", str(_BASE / "data"))) / "sales_hourly.csv"
 SRC_CSAT    = Path(_os.environ.get("DATA_DIR", str(_BASE / "data"))) / "sales_csat.csv"
+SRC_PHONES  = Path(_os.environ.get("DATA_DIR", str(_BASE / "data"))) / "sales_phones.csv"
+SRC_B2I     = Path(_os.environ.get("DATA_DIR", str(_BASE / "data"))) / "b2i_bookings.csv"
 OUT_DIR = _BASE / "output" / "web_sales"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 OUT = OUT_DIR / "index.html"
@@ -63,6 +65,47 @@ if SRC_CSAT.exists():
             "responses": int(cr["NUMERIC_RESPONSES"])   if cr["NUMERIC_RESPONSES"] else 0,
             "satisfied": int(cr["SATISFIED"])           if cr["SATISFIED"]         else 0,
         }
+
+# Load sales queue phone numbers by call date (for B2I conversion matching)
+# phones_by_date[date] = set of 10-digit phone strings
+phones_by_date = defaultdict(set)
+if SRC_PHONES.exists():
+    for _pr in csv.DictReader(SRC_PHONES.open()):
+        _pd = date.fromisoformat(_pr["CALL_DATE"])
+        _ph = (_pr.get("PHONE_CLEAN") or "").strip()
+        if _ph and len(_ph) >= 10:
+            phones_by_date[_pd].add(_ph[-10:])
+
+# Load B2I bookings: mobile -> list of booking dates
+from datetime import timedelta as _tdB
+b2i_by_phone = defaultdict(list)  # {10-digit phone: [booking_date, ...]}
+if SRC_B2I.exists():
+    for _br in csv.DictReader(SRC_B2I.open()):
+        _bph  = "".join(c for c in (_br.get("MOBILE") or "") if c.isdigit())
+        _bbct = (_br.get("BOOKING_CONFIRM_TIME") or "").strip()
+        if len(_bph) < 10 or not _bbct:
+            continue
+        _bph = _bph[-10:]
+        for _bfmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
+            try:
+                _bdate = datetime.strptime(_bbct, _bfmt).date()
+                b2i_by_phone[_bph].append(_bdate)
+                break
+            except ValueError:
+                pass
+
+# Pre-compute bookings per call date:
+#   For each call_date, count unique callers who made a booking within 7 days after that call.
+bookings_by_date = {}
+for _bcd, _bphones in phones_by_date.items():
+    _bwindow = _bcd + _tdB(days=7)
+    _nbooked = 0
+    for _bph2 in _bphones:
+        for _bdt in b2i_by_phone.get(_bph2, []):
+            if _bcd <= _bdt <= _bwindow:
+                _nbooked += 1
+                break  # count each caller once per call date
+    bookings_by_date[_bcd] = _nbooked
 
 # Normalise legacy label
 def _norm(v: str) -> str:
@@ -470,6 +513,43 @@ def metrics_table(ym):
         v = csat_by_date.get(d)
         cells.append(f'<td class="num">{"—" if v is None or v["responses"] == 0 else _fmt_csat(v["pct"])}</td>')
     rows_html.append(f'<tr class="row-class">{"".join(cells)}</tr>')
+
+    # Row 8 & 9: Bookings (7d) and Conversion % — June & July 2026 only
+    if ym in ((2026, 6), (2026, 7)):
+        # --- Bookings row ---
+        book_day  = {d: bookings_by_date.get(d, 0) for d in days_desc}
+        book_prev = {d: bookings_by_date.get(d, 0) for d in prev_days}
+        book_all  = {d: bookings_by_date.get(d, 0) for d in all_days_in_month}
+
+        book_mtd_total  = sum(book_all.values())
+        book_prev_total = sum(book_prev.values())
+
+        cells = ['<td class="disp disp-class">Bookings (7d conv)</td>']
+        cells.append(f'<td class="num mtd avgcol">{book_mtd_total}</td>')
+        cells.append(f'<td class="num prev avgcol">{book_prev_total}</td>')
+        for d in days_desc:
+            cells.append(f'<td class="num">{book_day.get(d, 0)}</td>')
+        rows_html.append(f'<tr class="row-class">{"".join(cells)}</tr>')
+
+        # --- Conversion % row ---
+        def _fmt_conv(n, denom):
+            return f'{n / denom * 100:.1f}%' if denom else '—'
+
+        # Weighted MTD: total bookings / total calls for the month
+        book_calls_mtd  = sum(
+            metrics_by_date.get(d, {}).get("total", 0) for d in all_days_in_month
+        )
+        book_calls_prev = sum(
+            metrics_by_date.get(d, {}).get("total", 0) for d in prev_days
+        )
+
+        cells = ['<td class="disp disp-class">Conversion %</td>']
+        cells.append(f'<td class="num mtd avgcol">{_fmt_conv(book_mtd_total, book_calls_mtd)}</td>')
+        cells.append(f'<td class="num prev avgcol">{_fmt_conv(book_prev_total, book_calls_prev)}</td>')
+        for d in days_desc:
+            _dcalls = metrics_by_date.get(d, {}).get("total", 0)
+            cells.append(f'<td class="num">{_fmt_conv(book_day.get(d, 0), _dcalls)}</td>')
+        rows_html.append(f'<tr class="row-class">{"".join(cells)}</tr>')
 
     return f'<table class="dash metrics-dash"><thead>{thead}</thead><tbody>{"".join(rows_html)}</tbody></table>'
 
