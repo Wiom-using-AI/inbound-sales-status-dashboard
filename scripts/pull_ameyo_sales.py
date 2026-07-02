@@ -168,8 +168,9 @@ run_query(SQL_CSAT, data_dir / "sales_csat.csv")
 # ---- Query 5: Sales queue caller phone numbers (for B2I conversion matching) ----
 SQL_PHONES = """
 SELECT
-    CALL_TIME::DATE  AS call_date,
-    REGEXP_REPLACE(COALESCE(TRIM(PHONE), ''), '[^0-9]', '') AS phone_clean
+    CALL_TIME::DATE                                                          AS call_date,
+    REGEXP_REPLACE(COALESCE(TRIM(PHONE), ''), '[^0-9]', '')                 AS phone_clean,
+    TO_VARCHAR(MIN(CALL_TIME), 'YYYY-MM-DD HH24:MI:SS')                     AS first_call_time
 FROM PROD_DB.PUBLIC.AMEYO_CALL_DETAILS_REPORT
 WHERE CALL_TYPE = 'inbound.call.dial'
   AND (
@@ -180,6 +181,7 @@ WHERE CALL_TYPE = 'inbound.call.dial'
   AND CALL_TIME::DATE >= '2026-05-01'
   AND PHONE IS NOT NULL
   AND TRIM(PHONE) != ''
+  AND COALESCE(USER_TALK_TIME, '00:00:00') != '00:00:00'
 GROUP BY 1, 2
 ORDER BY 1, 2
 """

@@ -67,18 +67,29 @@ if SRC_CSAT.exists():
         }
 
 # Load sales queue phone numbers by call date (for B2I conversion matching)
-# phones_by_date[date] = set of 10-digit phone strings
-phones_by_date = defaultdict(set)
+# phones_by_date[date] = {phone: first_call_datetime (or None)}
+from datetime import timedelta as _tdB
+phones_by_date = defaultdict(dict)
 if SRC_PHONES.exists():
     for _pr in csv.DictReader(SRC_PHONES.open()):
         _pd = date.fromisoformat(_pr["CALL_DATE"])
         _ph = (_pr.get("PHONE_CLEAN") or "").strip()
-        if _ph and len(_ph) >= 10:
-            phones_by_date[_pd].add(_ph[-10:])
+        if not (_ph and len(_ph) >= 10):
+            continue
+        _ph = _ph[-10:]
+        _fct_str = (_pr.get("FIRST_CALL_TIME") or "").strip()
+        _fct_dt = None
+        for _fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
+            try:
+                _fct_dt = datetime.strptime(_fct_str, _fmt)
+                break
+            except ValueError:
+                pass
+        phones_by_date[_pd][_ph] = _fct_dt
 
-# Load B2I bookings: mobile -> list of booking dates
-from datetime import timedelta as _tdB
-b2i_by_phone = defaultdict(list)  # {10-digit phone: [booking_date, ...]}
+# Load B2I bookings: mobile -> list of (booking_date, booking_datetime)
+# booking_datetime used for same-day call/booking ordering check
+b2i_by_phone = defaultdict(list)  # {10-digit phone: [(booking_date, booking_dt), ...]}
 if SRC_B2I.exists():
     for _br in csv.DictReader(SRC_B2I.open()):
         _bph  = "".join(c for c in (_br.get("MOBILE") or "") if c.isdigit())
@@ -88,23 +99,30 @@ if SRC_B2I.exists():
         _bph = _bph[-10:]
         for _bfmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
             try:
-                _bdate = datetime.strptime(_bbct, _bfmt).date()
-                b2i_by_phone[_bph].append(_bdate)
+                _bdt2 = datetime.strptime(_bbct, _bfmt)
+                b2i_by_phone[_bph].append((_bdt2.date(), _bdt2))
                 break
             except ValueError:
                 pass
 
 # Pre-compute bookings per call date:
-#   For each call_date, count unique callers who made a booking within 7 days after that call.
+#   Count unique callers who booked within 7 days AFTER their call.
+#   For same-day bookings: only count if booking_time > first_call_time
+#   (excludes customers who booked before calling — they'd call for support, not as a fresh lead).
 bookings_by_date = {}
-for _bcd, _bphones in phones_by_date.items():
+for _bcd, _phone_map in phones_by_date.items():
     _bwindow = _bcd + _tdB(days=7)
     _nbooked = 0
-    for _bph2 in _bphones:
-        for _bdt in b2i_by_phone.get(_bph2, []):
-            if _bcd <= _bdt <= _bwindow:
-                _nbooked += 1
-                break  # count each caller once per call date
+    for _bph2, _call_dt in _phone_map.items():
+        for _bdate2, _book_dt2 in b2i_by_phone.get(_bph2, []):
+            if _bdate2 < _bcd or _bdate2 > _bwindow:
+                continue  # outside the 7-day window
+            if _bdate2 == _bcd:
+                # Same day: booking must have happened AFTER the call
+                if _call_dt and _book_dt2 and _book_dt2 <= _call_dt:
+                    continue  # booked before/during call → not a conversion
+            _nbooked += 1
+            break  # count each caller at most once per call date
     bookings_by_date[_bcd] = _nbooked
 
 # Normalise legacy label
