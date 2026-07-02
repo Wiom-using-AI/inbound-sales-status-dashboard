@@ -532,23 +532,27 @@ def metrics_table(ym):
         rows_html.append(f'<tr class="row-class">{"".join(cells)}</tr>')
 
         # --- Conversion % row ---
+        # Denominator = Sales Queue disposition count (not total calls)
+        # i.e. sum of all disposition codes under "Sales Queue" class per day
+        sq_counts_by_day = defaultdict(int)
+        for (_sq_cls, _), _sq_dd in counts.items():
+            if _sq_cls == "Sales Queue":
+                for _sq_d, _sq_n in _sq_dd.items():
+                    sq_counts_by_day[_sq_d] += _sq_n
+
         def _fmt_conv(n, denom):
             return f'{n / denom * 100:.1f}%' if denom else '—'
 
-        # Weighted MTD: total bookings / total calls for the month
-        book_calls_mtd  = sum(
-            metrics_by_date.get(d, {}).get("total", 0) for d in all_days_in_month
-        )
-        book_calls_prev = sum(
-            metrics_by_date.get(d, {}).get("total", 0) for d in prev_days
-        )
+        # Weighted: total bookings / total Sales Queue calls for the period
+        sq_mtd_total  = sum(sq_counts_by_day.get(d, 0) for d in all_days_in_month)
+        sq_prev_total = sum(sq_counts_by_day.get(d, 0) for d in prev_days)
 
         cells = ['<td class="disp disp-class">Conversion %</td>']
-        cells.append(f'<td class="num mtd avgcol">{_fmt_conv(book_mtd_total, book_calls_mtd)}</td>')
-        cells.append(f'<td class="num prev avgcol">{_fmt_conv(book_prev_total, book_calls_prev)}</td>')
+        cells.append(f'<td class="num mtd avgcol">{_fmt_conv(book_mtd_total, sq_mtd_total)}</td>')
+        cells.append(f'<td class="num prev avgcol">{_fmt_conv(book_prev_total, sq_prev_total)}</td>')
         for d in days_desc:
-            _dcalls = metrics_by_date.get(d, {}).get("total", 0)
-            cells.append(f'<td class="num">{_fmt_conv(book_day.get(d, 0), _dcalls)}</td>')
+            _sq_d_calls = sq_counts_by_day.get(d, 0)
+            cells.append(f'<td class="num">{_fmt_conv(book_day.get(d, 0), _sq_d_calls)}</td>')
         rows_html.append(f'<tr class="row-class">{"".join(cells)}</tr>')
 
     return f'<table class="dash metrics-dash"><thead>{thead}</thead><tbody>{"".join(rows_html)}</tbody></table>'
