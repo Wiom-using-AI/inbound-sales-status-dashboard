@@ -31,8 +31,9 @@ SRC = Path(_os.environ.get("DATA_DIR", str(_BASE / "data"))) / "sales_daily.csv"
 SRC_METRICS = Path(_os.environ.get("DATA_DIR", str(_BASE / "data"))) / "sales_metrics.csv"
 SRC_HOURLY  = Path(_os.environ.get("DATA_DIR", str(_BASE / "data"))) / "sales_hourly.csv"
 SRC_CSAT    = Path(_os.environ.get("DATA_DIR", str(_BASE / "data"))) / "sales_csat.csv"
-SRC_PHONES  = Path(_os.environ.get("DATA_DIR", str(_BASE / "data"))) / "sales_phones.csv"
-SRC_B2I     = Path(_os.environ.get("DATA_DIR", str(_BASE / "data"))) / "b2i_bookings.csv"
+SRC_PHONES   = Path(_os.environ.get("DATA_DIR", str(_BASE / "data"))) / "sales_phones.csv"
+SRC_B2I      = Path(_os.environ.get("DATA_DIR", str(_BASE / "data"))) / "b2i_bookings.csv"
+SRC_UNIQ_CAL = Path(_os.environ.get("DATA_DIR", str(_BASE / "data"))) / "sales_unique_callers.csv"
 OUT_DIR = _BASE / "output" / "web_sales"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 OUT = OUT_DIR / "index.html"
@@ -104,6 +105,13 @@ if SRC_B2I.exists():
                 break
             except ValueError:
                 pass
+
+# Load unique caller counts per day (all phones, any disposition)
+unique_callers_by_date = {}  # {date: int}
+if SRC_UNIQ_CAL.exists():
+    for _uc in csv.DictReader(SRC_UNIQ_CAL.open()):
+        _ucd = date.fromisoformat(_uc["CALL_DATE"])
+        unique_callers_by_date[_ucd] = int(_uc.get("UNIQUE_CALLERS") or 0)
 
 # Pre-compute bookings per call date:
 #   Count unique callers who booked within 7 days AFTER their call.
@@ -550,27 +558,19 @@ def metrics_table(ym):
         rows_html.append(f'<tr class="row-class">{"".join(cells)}</tr>')
 
         # --- Conversion % row ---
-        # Denominator = Sales Queue disposition count (not total calls)
-        # i.e. sum of all disposition codes under "Sales Queue" class per day
-        sq_counts_by_day = defaultdict(int)
-        for (_sq_cls, _), _sq_dd in counts.items():
-            if _sq_cls == "Sales Queue":
-                for _sq_d, _sq_n in _sq_dd.items():
-                    sq_counts_by_day[_sq_d] += _sq_n
-
+        # Denominator = total unique callers in sales_queue per day (all phones, any disposition)
         def _fmt_conv(n, denom):
             return f'{n / denom * 100:.1f}%' if denom else '—'
 
-        # Weighted: total bookings / total Sales Queue calls for the period
-        sq_mtd_total  = sum(sq_counts_by_day.get(d, 0) for d in all_days_in_month)
-        sq_prev_total = sum(sq_counts_by_day.get(d, 0) for d in prev_days)
+        uniq_mtd_total  = sum(unique_callers_by_date.get(d, 0) for d in all_days_in_month)
+        uniq_prev_total = sum(unique_callers_by_date.get(d, 0) for d in prev_days)
 
         cells = ['<td class="disp disp-class">Conversion %</td>']
-        cells.append(f'<td class="num mtd avgcol">{_fmt_conv(book_mtd_total, sq_mtd_total)}</td>')
-        cells.append(f'<td class="num prev avgcol">{_fmt_conv(book_prev_total, sq_prev_total)}</td>')
+        cells.append(f'<td class="num mtd avgcol">{_fmt_conv(book_mtd_total, uniq_mtd_total)}</td>')
+        cells.append(f'<td class="num prev avgcol">{_fmt_conv(book_prev_total, uniq_prev_total)}</td>')
         for d in days_desc:
-            _sq_d_calls = sq_counts_by_day.get(d, 0)
-            cells.append(f'<td class="num">{_fmt_conv(book_day.get(d, 0), _sq_d_calls)}</td>')
+            _uniq_d = unique_callers_by_date.get(d, 0)
+            cells.append(f'<td class="num">{_fmt_conv(book_day.get(d, 0), _uniq_d)}</td>')
         rows_html.append(f'<tr class="row-class">{"".join(cells)}</tr>')
 
     return f'<table class="dash metrics-dash"><thead>{thead}</thead><tbody>{"".join(rows_html)}</tbody></table>'
