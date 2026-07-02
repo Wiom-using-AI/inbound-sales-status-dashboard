@@ -33,6 +33,7 @@ SRC         = _DATA / "ameyo_daily.csv"
 SRC_METRICS = _DATA / "ameyo_metrics.csv"
 SRC_HOURLY  = _DATA / "ameyo_hourly.csv"
 SRC_CSAT    = _DATA / "service_csat.csv"
+SRC_REPEAT  = _DATA / "ameyo_repeat.csv"
 OUT_DIR = _BASE / "output" / "web"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 OUT = OUT_DIR / "index.html"
@@ -69,6 +70,16 @@ if SRC_CSAT.exists():
             "surveyed":  int(cr["TOTAL_SURVEYED"]),
             "responded": int(cr["TOTAL_RESPONDED"]),
             "satisfied": int(cr["CSAT_SATISFIED"]),
+        }
+
+# Load repeat caller data: call_date -> {unique_callers, repeat_callers}
+repeat_by_date = {}
+if SRC_REPEAT.exists():
+    for rr in csv.DictReader(SRC_REPEAT.open()):
+        d = date.fromisoformat(rr["CALL_DATE"])
+        repeat_by_date[d] = {
+            "unique":  int(rr["UNIQUE_CALLERS"]),
+            "repeat":  int(rr["REPEAT_CALLERS"]),
         }
 
 # Load hourly data:
@@ -436,6 +447,33 @@ def metrics_table(ym):
     cells.append(f'<td class="num prev avgcol">{fmt_pct(csat_pct_pavg) if csat_pct_pavg is not None else "—"}</td>')
     for d in days_desc:
         v = csat_pct_day.get(d)
+        cells.append(f'<td class="num">{fmt_pct(v) if v is not None else "—"}</td>')
+    rows_html.append(f'<tr class="row-class">{"".join(cells)}</tr>')
+
+    # Row 7: Repeat Caller % = callers who called >1 time on same day ÷ unique callers
+    def _repeat_pct(d):
+        r = repeat_by_date.get(d, {})
+        uniq = r.get("unique", 0)
+        rep  = r.get("repeat", 0)
+        return (rep / uniq * 100) if uniq else None
+
+    repeat_pct_day   = {d: _repeat_pct(d) for d in days_desc}
+    repeat_pct_prev  = {d: _repeat_pct(d) for d in prev_days}
+    repeat_pct_fprev = {d: _repeat_pct(d) for d in _fpd}
+
+    _rep_complete_vals  = [v for d in complete_days if (v := _repeat_pct(d)) is not None]
+    _rep_prev_vals      = [v for v in repeat_pct_prev.values()  if v is not None]
+    _rep_fprev_vals     = [v for v in repeat_pct_fprev.values() if v is not None]
+    repeat_pct_mtd   = avg(_rep_complete_vals)  if _rep_complete_vals  else None
+    repeat_pct_pavg  = avg(_rep_prev_vals)       if _rep_prev_vals      else None
+    repeat_pct_fpavg = avg(_rep_fprev_vals)      if _rep_fprev_vals     else None
+
+    cells = ['<td class="disp disp-class">Repeat Caller %</td>']
+    cells.append(f'<td class="num mtd avgcol">{fmt_pct(repeat_pct_mtd) if repeat_pct_mtd is not None else "—"}</td>')
+    cells.append(_fpc_str(fmt_pct(repeat_pct_fpavg) if repeat_pct_fpavg is not None else "—"))
+    cells.append(f'<td class="num prev avgcol">{fmt_pct(repeat_pct_pavg) if repeat_pct_pavg is not None else "—"}</td>')
+    for d in days_desc:
+        v = repeat_pct_day.get(d)
         cells.append(f'<td class="num">{fmt_pct(v) if v is not None else "—"}</td>')
     rows_html.append(f'<tr class="row-class">{"".join(cells)}</tr>')
 

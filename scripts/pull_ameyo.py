@@ -138,6 +138,29 @@ GROUP BY 1
 ORDER BY 1
 """
 
+SQL_REPEAT = """
+WITH per_customer AS (
+  SELECT
+    CALL_TIME::DATE        AS call_date,
+    TRIM(PHONE)            AS phone,
+    COUNT(*)               AS call_count
+  FROM PROD_DB.PUBLIC.AMEYO_CALL_DETAILS_REPORT
+  WHERE QUEUE_NAME IN ('high_pain_queue', 'low_pain_queue')
+    AND CALL_TYPE = 'inbound.call.dial'
+    AND PHONE IS NOT NULL
+    AND TRIM(PHONE) != ''
+    AND CALL_TIME::DATE >= '2026-02-01'
+  GROUP BY 1, 2
+)
+SELECT
+  call_date,
+  COUNT(*)                                                     AS unique_callers,
+  SUM(CASE WHEN call_count > 1 THEN 1 ELSE 0 END)             AS repeat_callers
+FROM per_customer
+GROUP BY 1
+ORDER BY 1
+"""
+
 print("Pulling disposition counts...")
 run_query(SQL_COUNTS, data_dir / "ameyo_daily.csv")
 
@@ -149,3 +172,6 @@ run_query(SQL_HOURLY, data_dir / "ameyo_hourly.csv")
 
 print("Pulling CSAT data (Service Queue)...")
 run_query(SQL_CSAT, data_dir / "service_csat.csv")
+
+print("Pulling repeat caller data (Service Queue)...")
+run_query(SQL_REPEAT, data_dir / "ameyo_repeat.csv")
