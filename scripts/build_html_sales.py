@@ -558,7 +558,7 @@ def metrics_table(ym):
         sq_uniq_mtd  = sum(len(phones_by_date.get(d, {})) for d in all_days_in_month)
         sq_uniq_prev = sum(len(phones_by_date.get(d, {})) for d in prev_days)
 
-        cells = ['<td class="disp disp-class">Conversion %</td>']
+        cells = ['<td class="disp disp-class">Conversion% (Unique calls)</td>']
         cells.append(f'<td class="num mtd avgcol">{_fmt_conv(book_mtd_total, sq_uniq_mtd)}</td>')
         cells.append(f'<td class="num prev avgcol">{_fmt_conv(book_prev_total, sq_uniq_prev)}</td>')
         for d in days_desc:
