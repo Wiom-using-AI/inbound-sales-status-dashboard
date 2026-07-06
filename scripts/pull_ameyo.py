@@ -175,5 +175,52 @@ run_query(SQL_HOURLY, data_dir / "ameyo_hourly.csv")
 print("Pulling CSAT data (Service Queue)...")
 run_query(SQL_CSAT, data_dir / "service_csat.csv")
 
+SQL_REPEAT_MONTHLY = """
+-- Period-level repeat %: a phone is counted once per period,
+-- marked repeat if it called >1x on any single day in that period.
+-- Rows: one per calendar month + one for Jun 16-30 (July baseline).
+WITH per_customer_day AS (
+  SELECT
+    CALL_TIME::DATE AS call_date,
+    TRIM(PHONE)     AS phone,
+    COUNT(*)        AS calls_that_day
+  FROM PROD_DB.PUBLIC.AMEYO_CALL_DETAILS_REPORT
+  WHERE QUEUE_NAME IN ('high_pain_queue', 'low_pain_queue')
+    AND CALL_TYPE = 'inbound.call.dial'
+    AND PHONE IS NOT NULL
+    AND TRIM(PHONE) != ''
+    AND CALL_TIME::DATE >= '2026-02-01'
+  GROUP BY 1, 2
+),
+monthly AS (
+  SELECT
+    DATE_TRUNC('month', call_date)::DATE AS period_start,
+    phone,
+    MAX(calls_that_day)                  AS max_daily_calls
+  FROM per_customer_day
+  GROUP BY 1, 2
+),
+jun1630 AS (
+  SELECT
+    DATE '2026-06-16'     AS period_start,
+    phone,
+    MAX(calls_that_day)   AS max_daily_calls
+  FROM per_customer_day
+  WHERE call_date BETWEEN '2026-06-16' AND '2026-06-30'
+  GROUP BY 1, 2
+),
+combined AS (SELECT * FROM monthly UNION ALL SELECT * FROM jun1630)
+SELECT
+  period_start,
+  COUNT(DISTINCT phone)                                           AS unique_callers,
+  COUNT(DISTINCT CASE WHEN max_daily_calls > 1 THEN phone END)  AS repeat_callers
+FROM combined
+GROUP BY 1
+ORDER BY 1
+"""
+
 print("Pulling repeat caller data (Service Queue)...")
 run_query(SQL_REPEAT, data_dir / "ameyo_repeat.csv")
+
+print("Pulling period-level repeat caller data (Service Queue)...")
+run_query(SQL_REPEAT_MONTHLY, data_dir / "ameyo_repeat_monthly.csv")
