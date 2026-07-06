@@ -75,26 +75,27 @@ if SRC_CSAT.exists():
         }
 
 # Load per-day repeat caller data (for daily columns)
+# Formula: Repeat % = (Total Calls - Unique Callers) / Total Calls
 repeat_by_date = {}
 if SRC_REPEAT.exists():
     for rr in csv.DictReader(SRC_REPEAT.open()):
         d = date.fromisoformat(rr["CALL_DATE"])
         repeat_by_date[d] = {
-            "unique":  int(rr["UNIQUE_CALLERS"]),
-            "repeat":  int(rr["REPEAT_CALLERS"]),
+            "unique": int(rr["UNIQUE_CALLERS"]),
+            "total":  int(rr.get("TOTAL_CALLS", 0)),
         }
 
 # Load period-level repeat data (for MTD / prev-month avg columns)
-# repeat_by_ym:    (year, month) -> repeat_pct   — one row per calendar month
-# repeat_jun1630:  float | None                  — Jun 16-30 special baseline
+# repeat_by_ym:   (year, month) -> repeat_pct  — one row per calendar month
+# repeat_jun1630: float | None                 — Jun 16-30 special baseline
 repeat_by_ym   = {}
 repeat_jun1630 = None
 if SRC_REPEAT_MONTHLY.exists():
     for rr in csv.DictReader(SRC_REPEAT_MONTHLY.open()):
-        d    = date.fromisoformat(rr["PERIOD_START"])
-        uniq = int(rr["UNIQUE_CALLERS"])
-        rep  = int(rr["REPEAT_CALLERS"])
-        pct  = (rep / uniq * 100) if uniq else None
+        d     = date.fromisoformat(rr["PERIOD_START"])
+        uniq  = int(rr["UNIQUE_CALLERS"])
+        total = int(rr["TOTAL_CALLS"])
+        pct   = ((total - uniq) / total * 100) if total else None
         if d == date(2026, 6, 16):          # Jun 16-30 special row
             repeat_jun1630 = pct
         else:
@@ -472,10 +473,10 @@ def metrics_table(ym):
     # MTD / prev avg cols → period-level from repeat_by_ym / repeat_jun1630
     # Daily cols          → per-day rate from repeat_by_date (unchanged)
     def _repeat_pct_day(d):
-        r = repeat_by_date.get(d, {})
-        uniq = r.get("unique", 0)
-        rep  = r.get("repeat", 0)
-        return (rep / uniq * 100) if uniq else None
+        r     = repeat_by_date.get(d, {})
+        total = r.get("total", 0)
+        uniq  = r.get("unique", 0)
+        return ((total - uniq) / total * 100) if total else None
 
     repeat_pct_day  = {d: _repeat_pct_day(d) for d in days_desc}
     repeat_pct_mtd  = repeat_by_ym.get(ym)                       # current month period-level

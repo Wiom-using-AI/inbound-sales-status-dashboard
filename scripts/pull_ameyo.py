@@ -141,6 +141,7 @@ ORDER BY 1
 """
 
 SQL_REPEAT = """
+-- Formula: Repeat % = (Total Calls - Unique Callers) / Total Calls
 WITH per_customer AS (
   SELECT
     CALL_TIME::DATE        AS call_date,
@@ -157,6 +158,7 @@ WITH per_customer AS (
 SELECT
   call_date,
   COUNT(*)                                                     AS unique_callers,
+  SUM(call_count)                                              AS total_calls,
   SUM(CASE WHEN call_count > 1 THEN 1 ELSE 0 END)             AS repeat_callers
 FROM per_customer
 GROUP BY 1
@@ -176,9 +178,8 @@ print("Pulling CSAT data (Service Queue)...")
 run_query(SQL_CSAT, data_dir / "service_csat.csv")
 
 SQL_REPEAT_MONTHLY = """
--- Period-level repeat %: a phone is counted once per period,
--- marked repeat if it called >1x on any single day in that period.
--- Rows: one per calendar month + one for Jun 16-30 (July baseline).
+-- Period-level repeat %: (Total Calls - Unique Callers) / Total Calls
+-- Rows: one per calendar month + one for Jun 16-30 (July 2026 baseline).
 WITH per_customer_day AS (
   SELECT
     CALL_TIME::DATE AS call_date,
@@ -196,15 +197,15 @@ monthly AS (
   SELECT
     DATE_TRUNC('month', call_date)::DATE AS period_start,
     phone,
-    MAX(calls_that_day)                  AS max_daily_calls
+    SUM(calls_that_day)                  AS phone_total_calls
   FROM per_customer_day
   GROUP BY 1, 2
 ),
 jun1630 AS (
   SELECT
-    DATE '2026-06-16'     AS period_start,
+    DATE '2026-06-16'             AS period_start,
     phone,
-    MAX(calls_that_day)   AS max_daily_calls
+    SUM(calls_that_day)           AS phone_total_calls
   FROM per_customer_day
   WHERE call_date BETWEEN '2026-06-16' AND '2026-06-30'
   GROUP BY 1, 2
@@ -212,8 +213,8 @@ jun1630 AS (
 combined AS (SELECT * FROM monthly UNION ALL SELECT * FROM jun1630)
 SELECT
   period_start,
-  COUNT(DISTINCT phone)                                           AS unique_callers,
-  COUNT(DISTINCT CASE WHEN max_daily_calls > 1 THEN phone END)  AS repeat_callers
+  COUNT(DISTINCT phone)     AS unique_callers,
+  SUM(phone_total_calls)    AS total_calls
 FROM combined
 GROUP BY 1
 ORDER BY 1
