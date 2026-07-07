@@ -80,14 +80,17 @@ def scheduler_loop():
             print(f"[scheduler] Refresh failed: {e}", flush=True)
 
 
-# --- Initial data pull ---
-refresh()
-
-# --- Background scheduler ---
-threading.Thread(target=scheduler_loop, daemon=True).start()
-
-# --- Start server ---
+# --- Start server FIRST so Railway health-check passes immediately ---
 print(f"=== Starting {LABEL} server ===", flush=True)
 os.environ["HOST"]           = "0.0.0.0"
 os.environ["DASHBOARD_ROOT"] = DASHBOARD_ROOT
+
+def _startup():
+    """Run the initial data pull + scheduler in background so the server
+    can start listening before Railway's health-check times out."""
+    refresh()
+    scheduler_loop()   # blocks forever, running every 60 min
+
+threading.Thread(target=_startup, daemon=True).start()
+
 exec(open(os.path.join(SCRIPTS, SERVE_SCRIPT)).read())
