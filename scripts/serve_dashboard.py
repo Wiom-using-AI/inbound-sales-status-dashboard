@@ -224,6 +224,19 @@ class Handler(SimpleHTTPRequestHandler):
 
 
 if __name__ == "__main__":
+    # Ensure the web root exists (background refresh may not have run yet)
+    ROOT.mkdir(parents=True, exist_ok=True)
+    placeholder = ROOT / "index.html"
+    if not placeholder.exists():
+        placeholder.write_text(
+            "<html><head><meta http-equiv='refresh' content='30'></head>"
+            "<body style='font-family:sans-serif;padding:60px;text-align:center'>"
+            "<h2>Dashboard is loading&hellip;</h2>"
+            "<p>Data is being pulled from Metabase. This page will refresh automatically.</p>"
+            "<p>Please wait ~2&ndash;3 minutes.</p>"
+            "</body></html>",
+            encoding="utf-8",
+        )
     os.chdir(str(ROOT))
     host = os.environ.get("HOST", "127.0.0.1")
     srv = ThreadingHTTPServer((host, PORT), Handler)
