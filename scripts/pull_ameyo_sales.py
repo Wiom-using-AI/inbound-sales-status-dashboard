@@ -162,6 +162,27 @@ run_query(SQL_METRICS, data_dir / "sales_metrics.csv")
 print("Pulling hourly data (Sales & Status Queue — last 8 days)...")
 run_query(SQL_HOURLY, data_dir / "sales_hourly.csv")
 
+SQL_MANPOWER_HOURLY = """
+SELECT
+    CALL_TIME::DATE                        AS call_date,
+    HOUR(CALL_TIME)                        AS call_hour,
+    COUNT(DISTINCT USER_ID)                AS agents_on_call
+FROM PROD_DB.PUBLIC.AMEYO_CALL_DETAILS_REPORT
+WHERE CALL_TYPE = 'inbound.call.dial'
+  AND (
+    (CALL_TIME::DATE >= '2026-04-01' AND QUEUE_NAME = 'sales_queue')
+    OR
+    (CALL_TIME::DATE < '2026-04-01' AND QUEUE_NAME IN ('sales_queue', 'booking_queue'))
+  )
+  AND CALL_TIME::DATE >= DATEADD('day', -8, CURRENT_DATE())
+  AND COALESCE(USER_TALK_TIME, '00:00:00') != '00:00:00'
+GROUP BY 1, 2
+ORDER BY 1, 2
+"""
+
+print("Pulling hourly manpower (agents on call per hour)...")
+run_query(SQL_MANPOWER_HOURLY, data_dir / "sales_manpower_hourly.csv")
+
 print("Pulling CSAT data (customerSupportInbound -> sales_queue)...")
 run_query(SQL_CSAT, data_dir / "sales_csat.csv")
 

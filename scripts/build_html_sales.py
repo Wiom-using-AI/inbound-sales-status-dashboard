@@ -31,8 +31,9 @@ SRC = Path(_os.environ.get("DATA_DIR", str(_BASE / "data"))) / "sales_daily.csv"
 SRC_METRICS = Path(_os.environ.get("DATA_DIR", str(_BASE / "data"))) / "sales_metrics.csv"
 SRC_HOURLY  = Path(_os.environ.get("DATA_DIR", str(_BASE / "data"))) / "sales_hourly.csv"
 SRC_CSAT    = Path(_os.environ.get("DATA_DIR", str(_BASE / "data"))) / "sales_csat.csv"
-SRC_PHONES   = Path(_os.environ.get("DATA_DIR", str(_BASE / "data"))) / "sales_phones.csv"
-SRC_B2I      = Path(_os.environ.get("DATA_DIR", str(_BASE / "data"))) / "b2i_bookings.csv"
+SRC_PHONES    = Path(_os.environ.get("DATA_DIR", str(_BASE / "data"))) / "sales_phones.csv"
+SRC_B2I       = Path(_os.environ.get("DATA_DIR", str(_BASE / "data"))) / "b2i_bookings.csv"
+SRC_MANPOWER  = Path(_os.environ.get("DATA_DIR", str(_BASE / "data"))) / "sales_manpower_hourly.csv"
 OUT_DIR = _BASE / "output" / "web_sales"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 OUT = OUT_DIR / "index.html"
@@ -850,7 +851,17 @@ for _d in curr_dates_list:
             day_data[str(h)] = {"t": _total, "d": _detail}
     payload[_d.isoformat()] = day_data
 
-PAYLOAD_JSON = json.dumps(payload)
+# Build MANPOWER for Current tab: {dateStr: {hourStr: agent_count}}
+manpower_hourly = {}
+if SRC_MANPOWER.exists():
+    for _mp in csv.DictReader(SRC_MANPOWER.open()):
+        _mpd = _mp["CALL_DATE"]
+        _mph = str(int(_mp["CALL_HOUR"]))
+        _mpa = int(_mp.get("AGENTS_ON_CALL") or 0)
+        manpower_hourly.setdefault(_mpd, {})[_mph] = _mpa
+
+PAYLOAD_JSON  = json.dumps(payload)
+MANPOWER_JSON = json.dumps(manpower_hourly)
 
 # CSS for Current tab (plain string — no f-string escaping needed)
 cur_tab_css = """
@@ -891,6 +902,7 @@ cur_tab_css = """
 cur_tab_js = (
     "// ---- Current Tab (Sales & Status Queue) ----\n"
     "const PAYLOAD = " + PAYLOAD_JSON + ";\n"
+    "const MANPOWER = " + MANPOWER_JSON + ";\n"
     + """
 const _curDates = Object.keys(PAYLOAD).sort().reverse();
 const H_START = 8, H_END = 22;
@@ -1039,7 +1051,8 @@ window.renderCurrent = function(dateStr) {
     + '<table class="dash curr-table" style="min-width:560px"><thead><tr>'
     + '<th style="' + _thSt + 'min-width:110px">Hour (IST)</th>'
     + '<th style="' + _thSt + 'min-width:80px">7D Avg</th>'
-    + '<th style="' + _thSt + 'min-width:100px">Today</th>';
+    + '<th style="' + _thSt + 'min-width:100px">Today</th>'
+    + '<th style="' + _thSt + 'min-width:75px;background:#FFF8E1;color:#E65100" title="Agents who handled at least one call in this hour">Manpower</th>';
   past.forEach(function(d) {
     thtml += '<th style="' + _thSt + 'min-width:65px">' + _fmtD(d) + '</th>';
   });
@@ -1081,6 +1094,9 @@ window.renderCurrent = function(dateStr) {
            + h + ':00–' + (h + 1) + ':00</td>';
     thtml += '<td class="num mtd avgcol">' + Math.round(av) + '</td>';
     thtml += '<td class="num" style="' + todayStyle + '">' + todayDisp + todaySub + '</td>';
+    var _mp = ((MANPOWER[dateStr] || {})[String(h)]);
+    thtml += '<td class="num" style="background:#FFF8E1;color:#E65100;font-weight:600">'
+           + (_mp !== undefined ? _mp : '—') + '</td>';
     past.forEach(function(d) {
       var hd = (PAYLOAD[d] || {})[String(h)];
       var v  = (hd && hd.t !== null && hd.t !== undefined) ? hd.t : 0;
@@ -1092,6 +1108,7 @@ window.renderCurrent = function(dateStr) {
   thtml += '<tr class="row-total"><td class="disp total-label" style="text-align:center">TOTAL</td>';
   thtml += '<td class="num avgcol">' + Math.round(totAvgSum) + '</td>';
   thtml += '<td class="num">' + (todayHasData ? totTodaySum : '') + '</td>';
+  thtml += '<td class="num" style="background:#FFF8E1"></td>';
   past.forEach(function(d) { thtml += '<td class="num">' + (totPast[d] || 0) + '</td>'; });
   thtml += '</tr></tbody></table></div>';
   document.getElementById('curTable').innerHTML = thtml;
