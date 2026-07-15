@@ -1046,15 +1046,17 @@ window.renderCurrent = function(dateStr) {
     var p = d.split('-');
     return parseInt(p[2]) + '-' + _mns2[parseInt(p[1])-1];
   }
-  var _thSt = 'position:static;top:auto;';
+  var _thSt  = 'position:static;top:auto;';
+  var _mpSt  = 'min-width:55px;background:#FFF8E1;color:#E65100;font-size:11px';
   var thtml = '<div style="overflow-x:auto;margin-top:16px">'
     + '<table class="dash curr-table" style="min-width:560px"><thead><tr>'
     + '<th style="' + _thSt + 'min-width:110px">Hour (IST)</th>'
     + '<th style="' + _thSt + 'min-width:80px">7D Avg</th>'
     + '<th style="' + _thSt + 'min-width:100px">Today</th>'
-    + '<th style="' + _thSt + 'min-width:75px;background:#FFF8E1;color:#E65100" title="Agents who handled at least one call in this hour">Manpower</th>';
+    + '<th style="' + _thSt + ';' + _mpSt + '" title="Agents on call (Today)">MW</th>';
   past.forEach(function(d) {
-    thtml += '<th style="' + _thSt + 'min-width:65px">' + _fmtD(d) + '</th>';
+    thtml += '<th style="' + _thSt + 'min-width:65px">' + _fmtD(d) + '</th>'
+           + '<th style="' + _thSt + ';' + _mpSt + '" title="Agents on call (' + _fmtD(d) + ')">MW</th>';
   });
   thtml += '</tr></thead><tbody>';
 
@@ -1089,27 +1091,34 @@ window.renderCurrent = function(dateStr) {
     }
     var todayDisp  = (tv === null || tv === undefined) ? '' : String(tv);
     var todayStyle = spiked ? 'background:#FFEBEE;font-weight:700' : '';
+    var _mpCellSt  = 'background:#FFF8E1;color:#E65100;font-weight:600;font-size:12px';
     thtml += '<tr>';
     thtml += '<td class="disp" style="text-align:center;padding-left:10px">'
            + h + ':00–' + (h + 1) + ':00</td>';
     thtml += '<td class="num mtd avgcol">' + Math.round(av) + '</td>';
     thtml += '<td class="num" style="' + todayStyle + '">' + todayDisp + todaySub + '</td>';
-    var _mp = ((MANPOWER[dateStr] || {})[String(h)]);
-    thtml += '<td class="num" style="background:#FFF8E1;color:#E65100;font-weight:600">'
-           + (_mp !== undefined ? _mp : '—') + '</td>';
+    var _mpToday = ((MANPOWER[dateStr] || {})[String(h)]);
+    thtml += '<td class="num" style="' + _mpCellSt + '">'
+           + (_mpToday !== undefined ? _mpToday : '—') + '</td>';
     past.forEach(function(d) {
-      var hd = (PAYLOAD[d] || {})[String(h)];
-      var v  = (hd && hd.t !== null && hd.t !== undefined) ? hd.t : 0;
+      var hd  = (PAYLOAD[d] || {})[String(h)];
+      var v   = (hd && hd.t !== null && hd.t !== undefined) ? hd.t : 0;
+      var _mpd = ((MANPOWER[d] || {})[String(h)]);
       thtml += '<td class="num">' + v + '</td>';
+      thtml += '<td class="num" style="' + _mpCellSt + '">'
+             + (_mpd !== undefined ? _mpd : '—') + '</td>';
     });
     thtml += '</tr>';
   }
-  // Total row
+  // Total row — calls summed, MW blank (can't sum agents across hours)
   thtml += '<tr class="row-total"><td class="disp total-label" style="text-align:center">TOTAL</td>';
   thtml += '<td class="num avgcol">' + Math.round(totAvgSum) + '</td>';
   thtml += '<td class="num">' + (todayHasData ? totTodaySum : '') + '</td>';
   thtml += '<td class="num" style="background:#FFF8E1"></td>';
-  past.forEach(function(d) { thtml += '<td class="num">' + (totPast[d] || 0) + '</td>'; });
+  past.forEach(function(d) {
+    thtml += '<td class="num">' + (totPast[d] || 0) + '</td>';
+    thtml += '<td class="num" style="background:#FFF8E1"></td>';
+  });
   thtml += '</tr></tbody></table></div>';
   document.getElementById('curTable').innerHTML = thtml;
 
