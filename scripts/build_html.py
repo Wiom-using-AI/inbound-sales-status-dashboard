@@ -33,8 +33,7 @@ SRC         = _DATA / "ameyo_daily.csv"
 SRC_METRICS = _DATA / "ameyo_metrics.csv"
 SRC_HOURLY  = _DATA / "ameyo_hourly.csv"
 SRC_CSAT    = _DATA / "service_csat.csv"
-SRC_REPEAT         = _DATA / "ameyo_repeat.csv"
-SRC_REPEAT_MONTHLY = _DATA / "ameyo_repeat_monthly.csv"
+SRC_REPEAT = _DATA / "ameyo_repeat.csv"
 OUT_DIR = _BASE / "output" / "web"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 OUT = OUT_DIR / "index.html"
@@ -74,7 +73,7 @@ if SRC_CSAT.exists():
             "satisfied": int(cr["CSAT_SATISFIED"]),
         }
 
-# Load per-day repeat caller data (for daily columns)
+# Load per-day repeat caller data
 # Formula: Repeat % = (Total Calls - Unique Callers) / Total Calls
 repeat_by_date = {}
 if SRC_REPEAT.exists():
@@ -84,22 +83,6 @@ if SRC_REPEAT.exists():
             "unique": int(rr["UNIQUE_CALLERS"]),
             "total":  int(rr.get("TOTAL_CALLS", 0)),
         }
-
-# Load period-level repeat data (for MTD / prev-month avg columns)
-# repeat_by_ym:   (year, month) -> repeat_pct  — one row per calendar month
-# repeat_jun1630: float | None                 — Jun 16-30 special baseline
-repeat_by_ym   = {}
-repeat_jun1630 = None
-if SRC_REPEAT_MONTHLY.exists():
-    for rr in csv.DictReader(SRC_REPEAT_MONTHLY.open()):
-        d     = date.fromisoformat(rr["PERIOD_START"])
-        uniq  = int(rr["UNIQUE_CALLERS"])
-        total = int(rr["TOTAL_CALLS"])
-        pct   = ((total - uniq) / total * 100) if total else None
-        if d == date(2026, 6, 16):          # Jun 16-30 special row
-            repeat_jun1630 = pct
-        else:
-            repeat_by_ym[(d.year, d.month)] = pct
 
 # Load hourly data:
 #   hourly_raw[date][hour][cls]       = total count  (for chart/table)
@@ -469,23 +452,24 @@ def metrics_table(ym):
         cells.append(f'<td class="num">{fmt_pct(v) if v is not None else "—"}</td>')
     rows_html.append(f'<tr class="row-class">{"".join(cells)}</tr>')
 
-    # Row 7: Repeat Caller % — period-level (unique phone deduplication across period)
-    # MTD / prev avg cols → period-level from repeat_by_ym / repeat_jun1630
-    # Daily cols          → per-day rate from repeat_by_date (unchanged)
+    # Row 7: Repeat Caller % = (Total Calls - Unique Callers) / Total Calls
+    # All avg columns aggregate the daily data (sum repeat calls / sum total calls)
+    # matching the Excel pivot formula exactly.
     def _repeat_pct_day(d):
         r     = repeat_by_date.get(d, {})
         total = r.get("total", 0)
         uniq  = r.get("unique", 0)
         return ((total - uniq) / total * 100) if total else None
 
-    repeat_pct_day  = {d: _repeat_pct_day(d) for d in days_desc}
-    repeat_pct_mtd  = repeat_by_ym.get(ym)                       # current month period-level
-    if full_prev_label:   # July 2026
-        repeat_pct_fpavg = repeat_by_ym.get(prev_ym)             # full June period-level
-        repeat_pct_pavg  = repeat_jun1630                         # Jun 16-30 period-level
-    else:
-        repeat_pct_fpavg = None
-        repeat_pct_pavg  = repeat_by_ym.get(prev_ym)             # full prev month period-level
+    def _rep_period_pct(days):
+        st = sum(repeat_by_date.get(d, {}).get("total",  0) for d in days)
+        su = sum(repeat_by_date.get(d, {}).get("unique", 0) for d in days)
+        return ((st - su) / st * 100) if st else None
+
+    repeat_pct_day   = {d: _repeat_pct_day(d) for d in days_desc}
+    repeat_pct_mtd   = _rep_period_pct(complete_days)
+    repeat_pct_pavg  = _rep_period_pct(prev_days)
+    repeat_pct_fpavg = _rep_period_pct(_fpd) if full_prev_label else None
 
     cells = ['<td class="disp disp-class">Repeat Caller %</td>']
     cells.append(f'<td class="num mtd avgcol">{fmt_pct(repeat_pct_mtd) if repeat_pct_mtd is not None else "—"}</td>')
