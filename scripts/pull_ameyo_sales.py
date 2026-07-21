@@ -224,13 +224,19 @@ B2I_URL = (
 )
 
 def download_b2i(out_path):
-    req = urllib.request.Request(B2I_URL, headers={"User-Agent": "Mozilla/5.0"})
-    with urllib.request.urlopen(req, timeout=60) as r:
-        csv_bytes = r.read()
-    # Guard: if response looks like an error page, skip
+    try:
+        req = urllib.request.Request(B2I_URL, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=60) as r:
+            csv_bytes = r.read()
+    except Exception as e:
+        print(f"  WARNING: B2I download failed ({e}). "
+              f"{'Keeping existing file.' if out_path.exists() else 'No existing file — bookings will be empty.'}")
+        return
+    # Guard: if response looks like an error/login page, skip
     text = csv_bytes.decode("utf-8", errors="replace").strip()
     if not text or text.startswith("<!"):
-        print("  WARNING: B2I download returned unexpected content — skipping.")
+        print("  WARNING: B2I download returned unexpected content (sheet may be private). "
+              f"{'Keeping existing file.' if out_path.exists() else 'No existing file — bookings will be empty.'}")
         return
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_bytes(csv_bytes)
